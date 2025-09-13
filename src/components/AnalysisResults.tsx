@@ -1,4 +1,5 @@
 import React from 'react';
+import { DependencyGraph } from './DependencyGraph';
 
 interface Dependency {
   source_file: string;
@@ -43,13 +44,24 @@ interface AnalysisResultsProps {
 
 export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, statistics }) => {
   const [selectedCommit, setSelectedCommit] = React.useState<CommitSnapshot | null>(null);
-  const [viewMode, setViewMode] = React.useState<'timeline' | 'statistics' | 'dependencies'>('timeline');
+  const [viewMode, setViewMode] = React.useState<'timeline' | 'statistics' | 'dependencies' | 'graph'>('timeline');
 
   // Dependencies view state
   const [dependencyFilter, setDependencyFilter] = React.useState('');
   const [dependencySort, setDependencySort] = React.useState<'source' | 'target' | 'type'>('source');
   const [dependencyLimit, setDependencyLimit] = React.useState(100);
   const [showAllDeps, setShowAllDeps] = React.useState(false);
+
+  // Edge filter state
+  const [edgeFilter, setEdgeFilter] = React.useState<{
+    sourceId: string;
+    targetId: string;
+    relationshipTypes: string[];
+  } | null>(null);
+
+  // Graph view state
+  const [levelOfDetail, setLevelOfDetail] = React.useState<'file' | 'folder'>('file');
+  const [selectedGraphNode, setSelectedGraphNode] = React.useState<string | null>(null);
 
   if (snapshots.length === 0) {
     return (
@@ -70,6 +82,12 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
     return `${(ms / 60000).toFixed(1)}m`;
   };
 
+  // Handle edge double-click from graph
+  const handleEdgeDoubleClick = (sourceId: string, targetId: string, relationshipTypes: string[]) => {
+    setEdgeFilter({ sourceId, targetId, relationshipTypes });
+    setViewMode('dependencies');
+  };
+
   // Helper functions for dependency management
   const getFilteredDependencies = (dependencies: Dependency[]) => {
     let filtered = dependencies;
@@ -82,6 +100,21 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
         dep.target_file.toLowerCase().includes(filter) ||
         dep.relationship_type.toLowerCase().includes(filter)
       );
+    }
+
+    // Apply edge filter from graph double-click
+    if (edgeFilter) {
+      filtered = filtered.filter(dep => {
+        const sourceMatch = dep.source_file.includes(edgeFilter.sourceId) ||
+                           edgeFilter.sourceId.includes(dep.source_file) ||
+                           dep.source_file === edgeFilter.sourceId;
+        const targetMatch = dep.target_file.includes(edgeFilter.targetId) ||
+                           edgeFilter.targetId.includes(dep.target_file) ||
+                           dep.target_file === edgeFilter.targetId;
+        const typeMatch = edgeFilter.relationshipTypes.includes(dep.relationship_type);
+
+        return sourceMatch && targetMatch && typeMatch;
+      });
     }
 
     // Apply sorting
@@ -124,11 +157,17 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           >
             📊 Statistics
           </button>
-          <button 
+          <button
             className={viewMode === 'dependencies' ? 'active' : ''}
             onClick={() => setViewMode('dependencies')}
           >
             🔗 Dependencies
+          </button>
+          <button
+            className={viewMode === 'graph' ? 'active' : ''}
+            onClick={() => setViewMode('graph')}
+          >
+            📊 Graph
           </button>
         </div>
       </div>
@@ -339,6 +378,41 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           </div>
         );
       })()}
+
+      {/* Graph View */}
+      {viewMode === 'graph' && selectedCommit && (
+        <div className="graph-view">
+          <div className="graph-header">
+            <h3>📊 Dependency Graph for Commit {selectedCommit.commit_info.hash.substring(0, 8)}</h3>
+
+            <div className="graph-controls">
+              <div className="control-group">
+                <label>Level of Detail:</label>
+                <select
+                  value={levelOfDetail}
+                  onChange={(e) => setLevelOfDetail(e.target.value as 'file' | 'folder')}
+                  className="lod-select"
+                >
+                  <option value="file">📄 Files</option>
+                  <option value="folder">📁 Folders</option>
+                </select>
+              </div>
+
+              {selectedGraphNode && (
+                <div className="selected-node-info">
+                  <strong>Selected:</strong> {selectedGraphNode.split('/').pop()}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DependencyGraph
+            dependencies={selectedCommit.analysis_result.dependencies}
+            levelOfDetail={levelOfDetail}
+            onNodeSelect={setSelectedGraphNode}
+          />
+        </div>
+      )}
 
       <style jsx>{`
         .analysis-results {
@@ -662,6 +736,50 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           text-align: center;
           padding: 40px;
           color: #6b7280;
+        }
+
+        /* Graph View Styles */
+        .graph-view {
+          margin-top: 20px;
+        }
+
+        .graph-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 20px;
+          padding: 16px 20px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+        }
+
+        .graph-controls {
+          display: flex;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .lod-select {
+          padding: 6px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          font-size: 14px;
+          background: white;
+          cursor: pointer;
+        }
+
+        .lod-select:focus {
+          outline: none;
+          border-color: #2563eb;
+        }
+
+        .selected-node-info {
+          font-size: 14px;
+          color: #2563eb;
+          padding: 6px 12px;
+          background: #eff6ff;
+          border-radius: 6px;
         }
       `}</style>
     </div>

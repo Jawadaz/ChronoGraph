@@ -11,9 +11,15 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "chronograph",
-        "width": 800,
-        "height": 600
+        "title": "ChronoGraph - Temporal Dependency Analyzer",
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "visible": true,
+        "focus": true,
+        "resizable": true,
+        "fullscreen": false,
+        "alwaysOnTop": false
       }
     ],
     "security": {

@@ -321,11 +321,10 @@ impl LakosAnalyzer {
             for (i, edge) in edges.iter().enumerate() {
                 match self.parse_lakos_edge(edge, project_path) {
                     Ok(Some(dep)) => {
-                        if i < 5 {
-                            println!("🔍 DEBUG: Successfully processed edge {}: {} -> {}", i,
-                                   dep.source_file.display(), dep.target_file.display());
-                        }
                         dependencies.push(dep);
+                        if i < 5 {
+                            println!("🔍 DEBUG: Successfully processed edge {}", i);
+                        }
                     }
                     Ok(None) => {
                         if i < 5 {

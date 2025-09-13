@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { RepositoryInput, AnalysisProgress, AnalysisResults, RepositoryManager } from './components'
 
+// Check if we're running in Tauri or in web browser
+const isTauri = () => {
+  return window.__TAURI__ !== undefined;
+};
+
 function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [progress, setProgress] = useState(null)
@@ -11,17 +16,18 @@ function App() {
   const [showLogs, setShowLogs] = useState(false)
   const [analysisLogs, setAnalysisLogs] = useState([])
   const [showRepositoryManager, setShowRepositoryManager] = useState(false)
+  const [isWebVersion, setIsWebVersion] = useState(!isTauri())
 
-  // Poll for progress updates during analysis
+  // Poll for progress updates during analysis (Tauri only)
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
-    
-    if (isAnalyzing) {
+
+    if (isAnalyzing && !isWebVersion) {
       interval = setInterval(async () => {
         try {
           const currentProgress = await invoke('get_analysis_progress');
           setProgress(currentProgress);
-          
+
           // Simulate adding logs based on progress (this would come from backend in real implementation)
           if (currentProgress && currentProgress.current_commit_hash) {
             const newLogEntry = `Checking out commit: ${currentProgress.current_commit_hash}`;
@@ -32,7 +38,7 @@ function App() {
               return prev;
             });
           }
-          
+
           // Check if analysis is complete
           if (currentProgress && currentProgress.phase === 'Completed') {
             setIsAnalyzing(false);
@@ -46,13 +52,37 @@ function App() {
         }
       }, 1000); // Poll every second
     }
-    
+
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isAnalyzing]);
+  }, [isAnalyzing, isWebVersion]);
 
   const fetchResults = async () => {
+    if (isWebVersion) {
+      // In web version, show sample data
+      setSnapshots([
+        {
+          commit_hash: 'abc123',
+          timestamp: Date.now(),
+          dependencies: Array.from({length: 546}, (_, i) => ({
+            source_file: `lib/module${i % 20}.dart`,
+            target_file: `lib/service${(i + 1) % 15}.dart`,
+            relationship_type: ['imports', 'extends', 'implements'][i % 3],
+            weight: Math.floor(Math.random() * 10) + 1
+          }))
+        }
+      ]);
+      setStatistics({
+        total_files: 125,
+        total_dependencies: 546,
+        average_dependencies_per_file: 4.4,
+        cycles_detected: 12,
+        instability_score: 0.67
+      });
+      return;
+    }
+
     try {
       const [snapshotsResult, statisticsResult] = await Promise.all([
         invoke('get_analysis_snapshots'),
@@ -75,9 +105,28 @@ function App() {
     setAnalysisLogs([]);
     setShowLogs(true);
 
+    if (isWebVersion) {
+      // In web version, simulate analysis with sample data
+      setAnalysisLogs(['🌐 Web version detected - showing sample data']);
+      setTimeout(() => {
+        setProgress({
+          phase: 'Analyzing dependencies',
+          current_commit: 1,
+          total_commits: 1,
+          current_commit_hash: 'sample-web-data'
+        });
+      }, 1000);
+
+      setTimeout(() => {
+        setIsAnalyzing(false);
+        fetchResults();
+      }, 3000);
+      return;
+    }
+
     try {
-      // Initialize analysis
-      await invoke('initialize_analysis', { 
+      // Initialize analysis (Tauri only)
+      await invoke('initialize_analysis', {
         githubUrl: repoUrl,
         configOptions: {
           commit_sampling: 5, // Every 5th commit
@@ -89,7 +138,7 @@ function App() {
 
       // Start analysis
       await invoke('start_analysis');
-      
+
     } catch (err: any) {
       setIsAnalyzing(false);
       setError(`Failed to start analysis: ${err}`);
@@ -102,16 +151,23 @@ function App() {
       <header className="app-header">
         <div className="header-content">
           <div>
-            <h1>🕰️ ChronoGraph</h1>
+            <h1>🕰️ ChronoGraph {isWebVersion && <span className="web-badge">🌐 Web Demo</span>}</h1>
             <p>Temporal Dependency Analyzer for Flutter/Dart Projects</p>
+            {isWebVersion && (
+              <p className="web-notice">
+                📱 For full functionality, download the desktop app
+              </p>
+            )}
           </div>
-          <button 
-            onClick={() => setShowRepositoryManager(true)}
-            className="repo-manager-button"
-            title="Manage cached repositories"
-          >
-            🗂️ Cache Manager
-          </button>
+          {!isWebVersion && (
+            <button
+              onClick={() => setShowRepositoryManager(true)}
+              className="repo-manager-button"
+              title="Manage cached repositories"
+            >
+              🗂️ Cache Manager
+            </button>
+          )}
         </div>
       </header>
 
@@ -161,10 +217,12 @@ function App() {
         )}
       </main>
 
-      <RepositoryManager
-        isVisible={showRepositoryManager}
-        onClose={() => setShowRepositoryManager(false)}
-      />
+      {!isWebVersion && (
+        <RepositoryManager
+          isVisible={showRepositoryManager}
+          onClose={() => setShowRepositoryManager(false)}
+        />
+      )}
 
       <style jsx>{`
         .app {
@@ -252,6 +310,23 @@ function App() {
         .error-message button:hover {
           background: #dc2626;
           color: white;
+        }
+
+        .web-badge {
+          font-size: 0.5em;
+          background: rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          padding: 4px 8px;
+          border-radius: 12px;
+          margin-left: 16px;
+          font-weight: normal;
+        }
+
+        .web-notice {
+          font-size: 0.9em;
+          opacity: 0.8;
+          margin-top: 8px;
+          font-style: italic;
         }
 
         @media (max-width: 768px) {
