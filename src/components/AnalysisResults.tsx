@@ -45,6 +45,12 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
   const [selectedCommit, setSelectedCommit] = React.useState<CommitSnapshot | null>(null);
   const [viewMode, setViewMode] = React.useState<'timeline' | 'statistics' | 'dependencies'>('timeline');
 
+  // Dependencies view state
+  const [dependencyFilter, setDependencyFilter] = React.useState('');
+  const [dependencySort, setDependencySort] = React.useState<'source' | 'target' | 'type'>('source');
+  const [dependencyLimit, setDependencyLimit] = React.useState(100);
+  const [showAllDeps, setShowAllDeps] = React.useState(false);
+
   if (snapshots.length === 0) {
     return (
       <div className="no-results">
@@ -62,6 +68,43 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
     if (ms < 1000) return `${ms}ms`;
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
     return `${(ms / 60000).toFixed(1)}m`;
+  };
+
+  // Helper functions for dependency management
+  const getFilteredDependencies = (dependencies: Dependency[]) => {
+    let filtered = dependencies;
+
+    // Apply text filter
+    if (dependencyFilter.trim()) {
+      const filter = dependencyFilter.toLowerCase();
+      filtered = filtered.filter(dep =>
+        dep.source_file.toLowerCase().includes(filter) ||
+        dep.target_file.toLowerCase().includes(filter) ||
+        dep.relationship_type.toLowerCase().includes(filter)
+      );
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      switch (dependencySort) {
+        case 'source':
+          return a.source_file.localeCompare(b.source_file);
+        case 'target':
+          return a.target_file.localeCompare(b.target_file);
+        case 'type':
+          return a.relationship_type.localeCompare(b.relationship_type);
+        default:
+          return 0;
+      }
+    });
+
+    // Apply display limit
+    const limit = showAllDeps ? filtered.length : dependencyLimit;
+    return {
+      displayed: filtered.slice(0, limit),
+      total: filtered.length,
+      hasMore: filtered.length > limit
+    };
   };
 
   return (
@@ -201,32 +244,101 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
         </div>
       )}
 
-      {viewMode === 'dependencies' && selectedCommit && (
-        <div className="dependencies-view">
-          <h3>🔗 Dependencies for Commit {selectedCommit.commit_info.hash.substring(0, 8)}</h3>
-          <div className="dependencies-list">
-            {selectedCommit.analysis_result.dependencies.slice(0, 50).map((dep, index) => (
-              <div key={index} className="dependency-item">
-                <div className="dependency-source">
-                  📄 {dep.source_file.split('/').pop()}
-                </div>
-                <div className="dependency-arrow">→</div>
-                <div className="dependency-target">
-                  📄 {dep.target_file.split('/').pop()}
-                </div>
-                <div className="dependency-type">
-                  {dep.relationship_type}
-                </div>
+      {viewMode === 'dependencies' && selectedCommit && (() => {
+        const depData = getFilteredDependencies(selectedCommit.analysis_result.dependencies);
+        return (
+          <div className="dependencies-view">
+            <h3>🔗 Dependencies for Commit {selectedCommit.commit_info.hash.substring(0, 8)}</h3>
+
+            {/* Controls */}
+            <div className="dependencies-controls">
+              <div className="control-group">
+                <input
+                  type="text"
+                  placeholder="Filter dependencies..."
+                  value={dependencyFilter}
+                  onChange={(e) => setDependencyFilter(e.target.value)}
+                  className="filter-input"
+                />
               </div>
-            ))}
-            {selectedCommit.analysis_result.dependencies.length > 50 && (
-              <div className="more-dependencies">
-                ... and {selectedCommit.analysis_result.dependencies.length - 50} more dependencies
+
+              <div className="control-group">
+                <label>Sort by:</label>
+                <select
+                  value={dependencySort}
+                  onChange={(e) => setDependencySort(e.target.value as 'source' | 'target' | 'type')}
+                  className="sort-select"
+                >
+                  <option value="source">Source File</option>
+                  <option value="target">Target File</option>
+                  <option value="type">Relationship Type</option>
+                </select>
               </div>
-            )}
+
+              <div className="control-group">
+                <label>Show:</label>
+                <select
+                  value={showAllDeps ? 'all' : dependencyLimit.toString()}
+                  onChange={(e) => {
+                    if (e.target.value === 'all') {
+                      setShowAllDeps(true);
+                    } else {
+                      setShowAllDeps(false);
+                      setDependencyLimit(parseInt(e.target.value));
+                    }
+                  }}
+                  className="limit-select"
+                >
+                  <option value="25">First 25</option>
+                  <option value="50">First 50</option>
+                  <option value="100">First 100</option>
+                  <option value="250">First 250</option>
+                  <option value="all">All ({depData.total})</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="dependencies-stats">
+              Showing {depData.displayed.length} of {depData.total} dependencies
+              {dependencyFilter && (
+                <span className="filter-indicator"> (filtered)</span>
+              )}
+            </div>
+
+            {/* Dependencies List */}
+            <div className="dependencies-list">
+              {depData.displayed.map((dep, index) => (
+                <div key={index} className="dependency-item">
+                  <div className="dependency-source" title={dep.source_file}>
+                    📄 {dep.source_file.split('/').pop() || dep.source_file}
+                    <div className="dependency-path">{dep.source_file.substring(0, dep.source_file.lastIndexOf('/'))}</div>
+                  </div>
+                  <div className="dependency-arrow">→</div>
+                  <div className="dependency-target" title={dep.target_file}>
+                    📄 {dep.target_file.split('/').pop() || dep.target_file}
+                    <div className="dependency-path">{dep.target_file.substring(0, dep.target_file.lastIndexOf('/'))}</div>
+                  </div>
+                  <div className="dependency-type">
+                    {dep.relationship_type}
+                  </div>
+                </div>
+              ))}
+
+              {depData.hasMore && !showAllDeps && (
+                <div className="more-dependencies">
+                  <button
+                    onClick={() => setShowAllDeps(true)}
+                    className="show-all-btn"
+                  >
+                    Show all {depData.total} dependencies
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <style jsx>{`
         .analysis-results {
@@ -416,11 +528,76 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           transition: width 0.3s ease;
         }
 
+        .dependencies-controls {
+          display: flex;
+          gap: 20px;
+          align-items: center;
+          margin: 16px 0;
+          padding: 16px;
+          background: #f9fafb;
+          border-radius: 8px;
+          border: 1px solid #e5e7eb;
+        }
+
+        .control-group {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .control-group label {
+          font-size: 14px;
+          font-weight: 500;
+          color: #374151;
+          white-space: nowrap;
+        }
+
+        .filter-input {
+          padding: 6px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          font-size: 14px;
+          width: 200px;
+        }
+
+        .filter-input:focus {
+          outline: none;
+          border-color: #2563eb;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .sort-select, .limit-select {
+          padding: 6px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          font-size: 14px;
+          background: white;
+          cursor: pointer;
+        }
+
+        .sort-select:focus, .limit-select:focus {
+          outline: none;
+          border-color: #2563eb;
+        }
+
+        .dependencies-stats {
+          margin: 8px 0;
+          font-size: 14px;
+          color: #6b7280;
+        }
+
+        .filter-indicator {
+          font-weight: 500;
+          color: #2563eb;
+        }
+
         .dependencies-list {
           display: flex;
           flex-direction: column;
           gap: 8px;
           margin-top: 16px;
+          max-height: 600px;
+          overflow-y: auto;
         }
 
         .dependency-item {
@@ -437,6 +614,16 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
         .dependency-target {
           flex: 1;
           font-family: monospace;
+          min-width: 0; /* Allow flex items to shrink */
+        }
+
+        .dependency-path {
+          font-size: 11px;
+          color: #9ca3af;
+          margin-top: 2px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .dependency-arrow {
@@ -454,7 +641,21 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           padding: 12px;
           text-align: center;
           color: #6b7280;
-          font-style: italic;
+        }
+
+        .show-all-btn {
+          background: #2563eb;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .show-all-btn:hover {
+          background: #1d4ed8;
         }
 
         .no-results {

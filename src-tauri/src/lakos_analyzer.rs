@@ -321,22 +321,26 @@ impl LakosAnalyzer {
             for (i, edge) in edges.iter().enumerate() {
                 match self.parse_lakos_edge(edge, project_path) {
                     Ok(Some(dep)) => {
+                        if i < 5 {
+                            println!("🔍 DEBUG: Successfully processed edge {}: {} -> {}", i,
+                                   dep.source_file.display(), dep.target_file.display());
+                        }
                         dependencies.push(dep);
                     }
                     Ok(None) => {
-                        // Edge skipped (normal)
+                        if i < 5 {
+                            println!("🔍 DEBUG: Edge {} skipped (returned None)", i);
+                        }
                     }
                     Err(e) => {
-                        eprintln!("Warning: Failed to process edge {}: {}", i, e);
+                        if i < 20 {
+                            println!("🔍 DEBUG: Failed to process edge {}: {} - Edge data: {:?}", i, e, edge);
+                        }
                         // Continue processing other edges instead of failing completely
                     }
                 }
-                
-                // Limit to first 10 edges for initial testing
-                if i >= 9 {
-                    println!("Limiting to first 10 edges for testing");
-                    break;
-                }
+
+                // Process all edges (testing limitation removed)
             }
             
             println!("Successfully processed {} dependencies from {} edges", dependencies.len(), edges.len());
