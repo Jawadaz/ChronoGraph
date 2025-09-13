@@ -1,9 +1,5 @@
 {
-  "name": "tauri",
-  "dev:debug": "set NODE_OPTIONS=--inspect && npm run dev",
-  "tauri:dev": "concurrently \"npm run dev\" \"tauri dev\" --kill-others-on-fail",
-  "tauri:dev-debug": "concurrently \"npm run dev:debug\" \"tauri dev\" --kill-others-on-fail",
-  "tauri:build": "tauri build",
+  "name": "chronograph",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,20 +7,15 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "dev:debug": "set NODE_OPTIONS=--inspect && vite",
     "tauri": "tauri",
+    "dev:debug": "set NODE_OPTIONS=--inspect && vite",
     "tauri:dev": "concurrently \"npm run dev\" \"tauri dev\" --kill-others-on-fail",
     "tauri:dev-debug": "concurrently \"npm run dev:debug\" \"tauri dev\" --kill-others-on-fail",
     "tauri:build": "tauri build"
   },
-  "devDependencies": {
-    "concurrently": "^9.2.1"
-  },
   "dependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.50.1",
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/cli": "^2.8.4",
-    "@tauri-apps/cli-win32-x64-msvc": "^2.8.4",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
@@ -32,5 +23,8 @@
     "react-dom": "^19.1.1",
     "typescript": "^5.9.2",
     "vite": "^7.1.5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

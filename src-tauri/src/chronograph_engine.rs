@@ -158,8 +158,18 @@ impl ChronoGraphEngine {
                     snapshots.push(snapshot);
                 }
                 Err(e) => {
-                    println!("Warning: Failed to analyze commit {}: {}", commit_info.hash, e);
-                    // Continue with next commit rather than failing entirely
+                    let error_msg = format!("Failed to analyze commit {}: {}", commit_info.hash, e);
+                    println!("❌ Error: {}", error_msg);
+                    
+                    // For critical failures (like Lakos not working), fail immediately
+                    if e.to_string().contains("Failed to run dependency analysis") || 
+                       e.to_string().contains("Directory listing failed") ||
+                       e.to_string().contains("Lakos") {
+                        return Err(anyhow::anyhow!("{}", error_msg));
+                    }
+                    
+                    // For other errors, continue with warning
+                    println!("Warning: Continuing with next commit...");
                 }
             }
         }

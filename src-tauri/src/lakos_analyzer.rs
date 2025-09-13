@@ -5,6 +5,7 @@ use anyhow::{Result, Context};
 use serde_json::Value;
 use std::collections::HashMap;
 
+
 /// Lakos dependency analyzer implementation
 pub struct LakosAnalyzer {
     version: String,
@@ -23,8 +24,9 @@ impl LakosAnalyzer {
         
         // Use Windows executable directly to bypass shebang issues
         let dart_commands = vec![
-            "/mnt/c/Flutter/flutter/bin/cache/dart-sdk/bin/dart.exe",
-            "/mnt/c/Flutter/flutter/bin/dart.bat",
+            "C:\\Flutter\\flutter\\bin\\cache\\dart-sdk\\bin\\dart.exe",
+            "C:\\Flutter\\flutter\\bin\\dart.bat",
+            "dart",  // Fallback to system PATH
         ];
         
         for dart_cmd in dart_commands {
@@ -81,8 +83,9 @@ impl LakosAnalyzer {
         
         // Use Windows executable directly to bypass shebang issues
         let dart_commands = vec![
-            "/mnt/c/Flutter/flutter/bin/cache/dart-sdk/bin/dart.exe",
-            "/mnt/c/Flutter/flutter/bin/dart.bat",
+            "C:\\Flutter\\flutter\\bin\\cache\\dart-sdk\\bin\\dart.exe",
+            "C:\\Flutter\\flutter\\bin\\dart.bat",
+            "dart",  // Fallback to system PATH
         ];
         
         let mut last_error = String::new();
@@ -154,20 +157,24 @@ impl LakosAnalyzer {
         // Use Windows executable directly with cmd.exe wrapper to bypass shebang issues
         let dart_commands = vec![
             // Direct path to Windows dart.exe
-            "/mnt/c/Flutter/flutter/bin/cache/dart-sdk/bin/dart.exe",
-            "/mnt/c/Flutter/flutter/bin/dart.bat",
+            "C:\\Flutter\\flutter\\bin\\cache\\dart-sdk\\bin\\dart.exe",
+            "C:\\Flutter\\flutter\\bin\\dart.bat",
+            "dart",  // Fallback to system PATH
         ];
         
         let mut last_error = String::new();
         
         for dart_cmd in dart_commands {
             println!("🔍 DEBUG: Trying dart command: {}", dart_cmd);
+            
+            // Use project path directly for native Windows execution
+            let project_path_str = project_path.to_string_lossy().to_string();
+            
             let mut cmd = Command::new(dart_cmd);
             cmd.args(&["pub", "global", "run", "lakos"])
                 .arg("--format=json")  // Correct format flag
                 .arg("--metrics")      // Enable metrics
-                .arg("--node-metrics") // Enable node metrics
-                .current_dir(project_path);
+                .arg("--node-metrics"); // Enable node metrics
                 
             // Add ignore patterns using correct syntax
             for pattern in &config.ignore_patterns {
@@ -176,10 +183,11 @@ impl LakosAnalyzer {
                 }
             }
             
-            // Add the root directory (current directory)
-            cmd.arg(".");
+            // Use current directory and set working directory
+            cmd.arg(".")
+               .current_dir(&project_path);
             
-            println!("🔍 DEBUG: Running command: {:?} in directory: {}", cmd, project_path.display());
+            println!("🔍 DEBUG: Running command: \"{}\" pub global run lakos --format=json --metrics --node-metrics . in directory: {}", dart_cmd, project_path.display());
             
             match cmd.output() {
                 Ok(output) => {
@@ -191,6 +199,9 @@ impl LakosAnalyzer {
                     println!("🔍 DEBUG: stdout length: {} chars", stdout.len());
                     println!("🔍 DEBUG: stderr length: {} chars", stderr.len());
                     
+                    if stdout.len() > 0 {
+                        println!("🔍 DEBUG: stdout content: {}", stdout);
+                    }
                     if stderr.len() > 0 {
                         println!("🔍 DEBUG: stderr content: {}", stderr);
                     }
@@ -204,7 +215,7 @@ impl LakosAnalyzer {
                                  exit_code, 
                                  if exit_code == 5 { "cycles detected" } else { "success" });
                         
-                        let stdout_string = String::from_utf8(output.stdout)?;
+                        let stdout_string = String::from_utf8_lossy(&output.stdout).to_string();
                         if stdout_string.trim().is_empty() {
                             println!("🔍 DEBUG: WARNING - Lakos output is empty");
                         } else {
@@ -225,20 +236,20 @@ impl LakosAnalyzer {
             }
         }
         
-        // Try with bash wrapper as fallback - use correct Lakos command format
-        let mut bash_cmd = "/mnt/c/Flutter/flutter/bin/cache/dart-sdk/bin/dart.exe pub global run lakos --format=json --metrics --node-metrics".to_string();
+        // Try with direct command as fallback
+        let project_path_str = project_path.to_string_lossy().to_string();
+        
+        let mut direct_cmd = format!("cd \"{}\" && dart pub global run lakos --format=json --metrics --node-metrics .", project_path.display());
         for pattern in &config.ignore_patterns {
             if pattern.contains("test") {
-                bash_cmd.push_str(" --ignore=**/*test*/**");
+                direct_cmd.push_str(" --ignore=**/*test*/**");
             }
         }
-        bash_cmd.push_str(" .");
         
-        println!("🔍 DEBUG: Trying bash fallback: {}", bash_cmd);
+        println!("🔍 DEBUG: Trying direct command fallback: {}", direct_cmd);
         
         match Command::new("bash")
-            .args(&["-c", &bash_cmd])
-            .current_dir(project_path)
+            .args(&["-c", &direct_cmd])
             .output()
         {
             Ok(output) => {
@@ -250,6 +261,9 @@ impl LakosAnalyzer {
                 println!("🔍 DEBUG: Bash fallback stdout: {} chars", stdout.len());
                 println!("🔍 DEBUG: Bash fallback stderr: {} chars", stderr.len());
                 
+                if stdout.len() > 0 {
+                    println!("🔍 DEBUG: Bash fallback stdout: {}", stdout);
+                }
                 if stderr.len() > 0 {
                     println!("🔍 DEBUG: Bash fallback stderr: {}", stderr);
                 }
@@ -280,17 +294,59 @@ impl LakosAnalyzer {
     
     /// Parse lakos JSON output into RawDependency objects
     fn parse_lakos_json(&self, json_str: &str, project_path: &Path) -> Result<Vec<RawDependency>> {
+        println!("🔍 DEBUG: Starting JSON parse, input length: {} chars", json_str.len());
+        println!("🔍 DEBUG: JSON first 500 chars: {}", json_str.chars().take(500).collect::<String>());
+        
         let json: Value = serde_json::from_str(json_str)
-            .context("Failed to parse Lakos JSON output")?;
-            
+            .with_context(|| {
+                println!("🔍 DEBUG: JSON parsing failed!");
+                println!("🔍 DEBUG: JSON length: {}", json_str.len());
+                println!("🔍 DEBUG: First 200 chars: {}", json_str.chars().take(200).collect::<String>());
+                println!("🔍 DEBUG: Last 200 chars: {}", json_str.chars().rev().take(200).collect::<String>().chars().rev().collect::<String>());
+                format!("Failed to parse Lakos JSON output. JSON length: {}, starts with: {}", 
+                       json_str.len(), 
+                       json_str.chars().take(100).collect::<String>())
+            })?;
+        
+        println!("🔍 DEBUG: JSON parsed successfully, looking for edges");
         let mut dependencies = Vec::new();
         
-        // Lakos JSON structure: { "nodes": [...], "edges": [...] }
+        // Lakos JSON structure: { "nodes": {...}, "edges": [...] }
         if let Some(edges) = json.get("edges").and_then(|e| e.as_array()) {
-            for edge in edges {
-                if let Some(dep) = self.parse_lakos_edge(edge, project_path)? {
-                    dependencies.push(dep);
+            println!("🔍 DEBUG: Found {} edges in JSON", edges.len());
+            
+            // Process edges using the proper parse_lakos_edge function
+            println!("Processing {} edges...", edges.len());
+            
+            for (i, edge) in edges.iter().enumerate() {
+                match self.parse_lakos_edge(edge, project_path) {
+                    Ok(Some(dep)) => {
+                        dependencies.push(dep);
+                    }
+                    Ok(None) => {
+                        // Edge skipped (normal)
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to process edge {}: {}", i, e);
+                        // Continue processing other edges instead of failing completely
+                    }
                 }
+                
+                // Limit to first 10 edges for initial testing
+                if i >= 9 {
+                    println!("Limiting to first 10 edges for testing");
+                    break;
+                }
+            }
+            
+            println!("Successfully processed {} dependencies from {} edges", dependencies.len(), edges.len());
+        } else {
+            println!("🔍 DEBUG: No edges array found in JSON or edges is not an array");
+            if let Some(edges_val) = json.get("edges") {
+                println!("🔍 DEBUG: Found edges key but value is: {:?}", edges_val);
+            } else {
+                println!("🔍 DEBUG: No edges key found in JSON. Available keys: {:?}", 
+                        json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
             }
         }
         
@@ -299,13 +355,15 @@ impl LakosAnalyzer {
     
     /// Parse a single edge from Lakos JSON
     fn parse_lakos_edge(&self, edge: &Value, project_path: &Path) -> Result<Option<RawDependency>> {
-        let source = edge.get("source")
+        // Parse edge from Lakos JSON
+        
+        let source = edge.get("from")
             .and_then(|s| s.as_str())
-            .context("Missing source in lakos edge")?;
-            
-        let target = edge.get("target")
+            .context("Missing from in lakos edge")?;
+        
+        let target = edge.get("to")
             .and_then(|t| t.as_str())
-            .context("Missing target in lakos edge")?;
+            .context("Missing to in lakos edge")?;
             
         // Convert lakos library names back to file paths
         let source_file = self.library_name_to_file_path(source, project_path)?;
@@ -337,10 +395,17 @@ impl LakosAnalyzer {
     }
     
     /// Convert lakos library name back to file path
-    /// Lakos uses library names like "lib/src/widgets/button.dart"
+    /// Lakos uses library names like "lib/src/widgets/button.dart" or "/lib/config/dependencies.dart"
     fn library_name_to_file_path(&self, library_name: &str, project_path: &Path) -> Result<PathBuf> {
+        // Handle absolute paths (starting with /) by removing leading slash
+        let clean_path = if library_name.starts_with('/') {
+            &library_name[1..] // Remove leading slash
+        } else {
+            library_name
+        };
+        
         // Lakos typically outputs relative paths from the project root
-        let relative_path = PathBuf::from(library_name);
+        let relative_path = PathBuf::from(clean_path);
         let full_path = project_path.join(&relative_path);
         
         // Verify the file exists
@@ -349,9 +414,9 @@ impl LakosAnalyzer {
         } else {
             // Try common variations
             let variations = vec![
-                project_path.join(format!("{}.dart", library_name)),
+                project_path.join(format!("{}.dart", clean_path)),
                 project_path.join("lib").join(&relative_path),
-                project_path.join("lib").join(format!("{}.dart", library_name)),
+                project_path.join("lib").join(format!("{}.dart", clean_path)),
             ];
             
             for variation in variations {
@@ -361,7 +426,7 @@ impl LakosAnalyzer {
             }
             
             // If file doesn't exist, still return the path but log warning
-            println!("Warning: File not found for library '{}', using path: {}", 
+            eprintln!("Warning: File not found for library '{}', using path: {}", 
                     library_name, full_path.display());
             Ok(full_path)
         }
@@ -425,10 +490,13 @@ impl DependencyAnalyzer for LakosAnalyzer {
             
         // Run lakos analysis
         let json_output = self.run_lakos(project_path, config)?;
+        println!("🔍 DEBUG: run_lakos returned successfully, JSON length: {} chars", json_output.len());
+        println!("🔍 DEBUG: About to call parse_lakos_json");
         
         // Parse dependencies
         let dependencies = self.parse_lakos_json(&json_output, project_path)
             .context("Failed to parse Lakos output")?;
+        println!("🔍 DEBUG: parse_lakos_json completed successfully, found {} dependencies", dependencies.len());
         
         let analysis_duration = start_time.elapsed();
         
