@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { DependencyGraph } from './DependencyGraph';
+import { CytoscapeGraph } from './CytoscapeGraph';
 
 interface Dependency {
   source_file: string;
@@ -62,6 +63,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
   // Graph view state
   const [levelOfDetail, setLevelOfDetail] = React.useState<'file' | 'folder'>('file');
   const [selectedGraphNode, setSelectedGraphNode] = React.useState<string | null>(null);
+  const [graphType, setGraphType] = useState<'d3' | 'cytoscape'>('cytoscape');
 
   if (snapshots.length === 0) {
     return (
@@ -423,12 +425,45 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
             </div>
           </div>
 
-          <DependencyGraph
-            dependencies={selectedCommit.analysis_result.dependencies}
-            levelOfDetail={levelOfDetail}
-            onNodeSelect={setSelectedGraphNode}
-            onEdgeDoubleClick={handleEdgeDoubleClick}
-          />
+          {/* Graph Type Selector */}
+          <div className="graph-type-selector">
+            <div className="selector-group">
+              <label>📊 Graph Engine:</label>
+              <select
+                value={graphType}
+                onChange={(e) => setGraphType(e.target.value as 'd3' | 'cytoscape')}
+                className="graph-type-select"
+              >
+                <option value="cytoscape">🆕 Cytoscape.js (Hierarchical)</option>
+                <option value="d3">🔧 D3.js (Current)</option>
+              </select>
+            </div>
+            <div className="graph-description">
+              {graphType === 'cytoscape' ?
+                '✨ New hierarchical layout with expandable folders and compound nodes' :
+                '🔧 Current force-directed layout for comparison'
+              }
+            </div>
+          </div>
+
+          {/* Conditional Graph Rendering */}
+          {graphType === 'cytoscape' ? (
+            <CytoscapeGraph
+              dependencies={selectedCommit.analysis_result.dependencies}
+              levelOfDetail={levelOfDetail}
+              onNodeSelect={setSelectedGraphNode}
+              onEdgeDoubleClick={handleEdgeDoubleClick}
+              viewRootFolder="/"
+              folderLevel={1}
+            />
+          ) : (
+            <DependencyGraph
+              dependencies={selectedCommit.analysis_result.dependencies}
+              levelOfDetail={levelOfDetail}
+              onNodeSelect={setSelectedGraphNode}
+              onEdgeDoubleClick={handleEdgeDoubleClick}
+            />
+          )}
         </div>
       )}
 
@@ -798,6 +833,51 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           padding: 6px 12px;
           background: #eff6ff;
           border-radius: 6px;
+        }
+
+        .graph-type-selector {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          background: #f0f9ff;
+          border: 1px solid #bae6fd;
+          border-radius: 8px;
+          margin: 16px 0;
+        }
+
+        .selector-group {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .selector-group label {
+          font-weight: 600;
+          color: #0c4a6e;
+          font-size: 14px;
+        }
+
+        .graph-type-select {
+          padding: 6px 12px;
+          border: 1px solid #0284c7;
+          border-radius: 6px;
+          background: white;
+          font-size: 14px;
+          cursor: pointer;
+          min-width: 200px;
+        }
+
+        .graph-type-select:focus {
+          outline: none;
+          border-color: #0369a1;
+          box-shadow: 0 0 0 2px #bae6fd;
+        }
+
+        .graph-description {
+          font-size: 13px;
+          color: #0369a1;
+          font-style: italic;
         }
 
         .edge-filter-compact {
