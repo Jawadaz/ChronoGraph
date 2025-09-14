@@ -1,14 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import cytoscape from 'cytoscape';
+import * as d3 from 'd3';
+import {
+  normalizePath,
+  isPathWithinFolder,
+  getRelativeFromViewRoot,
+  filterDependenciesForViewRoot,
+  getFolderAtLevel,
+  getFolderAtLevelRelativeToViewRoot,
+  type Dependency
+} from '../utils/dependencyFiltering';
 
-interface Dependency {
-  source_file: string;
-  target_file: string;
-  relationship_type: string;
-  weight: any;
-}
 
-interface GraphNode {
+interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
   label: string;
   type: 'file' | 'folder';
@@ -18,9 +21,9 @@ interface GraphNode {
   parent?: string;
 }
 
-interface GraphEdge {
-  source: string;
-  target: string;
+interface GraphEdge extends d3.SimulationLinkDatum<GraphNode> {
+  source: GraphNode;
+  target: GraphNode;
   weight: number;
   type: string;
   originalDependencies: Dependency[];
@@ -40,51 +43,106 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
   levelOfDetail = 'file'
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const cyRef = useRef<cytoscape.Core | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const simulationRef = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [folderLevel, setFolderLevel] = useState<number>(1);
+  const [viewRootFolder, setViewRootFolder] = useState<string>('/'); // Current zoom level root
 
-  // Helper function to get folder path at specific level
-  const getFolderAtLevel = (filePath: string, level: number): string => {
-    const parts = filePath.split('/').filter(part => part.length > 0);
-    if (level === 0 || parts.length === 0) return '/';
+  // Helper function to get consistent instability based on path hash
+  const getConsistentInstability = (path: string): number => {
+    // Create a simple hash from the path string for consistent coloring
+    let hash = 0;
+    for (let i = 0; i < path.length; i++) {
+      const char = path.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    // Convert hash to a value between 0 and 1
+    return Math.abs(hash) / 2147483647; // Max 32-bit signed integer
+  };
 
-    const folderParts = parts.slice(0, Math.min(level, parts.length - 1));
-    return folderParts.length > 0 ? folderParts.join('/') : '/';
+  // Helper function to get parent folder
+  const getParentFolder = (folderPath: string): string => {
+    if (folderPath === '/') return '/';
+    const lastSlashIndex = folderPath.lastIndexOf('/');
+    if (lastSlashIndex <= 0) return '/';
+    return folderPath.substring(0, lastSlashIndex);
   };
 
   // Transform dependencies into graph data
   const transformToGraphData = (deps: Dependency[], level: 'file' | 'folder', folderDepth?: number) => {
-    const nodes = new Map<string, GraphNode>();
-    const edgeMap = new Map<string, GraphEdge>(); // For edge aggregation
+    try {
+      const nodes = new Map<string, GraphNode>();
+      const edgeMap = new Map<string, GraphEdge>(); // For edge aggregation
 
-    deps.forEach((dep, index) => {
+      // Use advanced filtering
+      const { filtered: filteredDeps, strategy, stats } = filterDependenciesForViewRoot(deps, viewRootFolder);
+
+      // Comprehensive debug logging
+      if (viewRootFolder !== '/') {
+        console.log(`🔍 ViewRoot Analysis: ${viewRootFolder}`);
+        console.log(`📊 Dependency Stats:`, stats);
+        console.log(`🎯 Strategy Selected: ${strategy}`);
+        console.log(`📈 FilteredDeps: ${filteredDeps.length} (from ${deps.length} total)`);
+
+        if (filteredDeps.length > 0) {
+          console.log('✅ Sample filtered dependencies:', filteredDeps.slice(0, 3).map(dep => ({
+            source: dep.source_file,
+            target: dep.target_file,
+            relationship: dep.relationship_type
+          })));
+        } else {
+          console.warn('⚠️ No dependencies found with current strategy!');
+          console.log('🔍 ViewRoot filtering debug:', {
+            viewRootFolder,
+            normalizedViewRoot: normalizePath(viewRootFolder),
+            sampleDependencies: deps.slice(0, 5).map(dep => ({
+              source: dep.source_file,
+              target: dep.target_file,
+              sourceNorm: normalizePath(dep.source_file),
+              targetNorm: normalizePath(dep.target_file),
+              sourceWithin: isPathWithinFolder(dep.source_file, viewRootFolder),
+              targetWithin: isPathWithinFolder(dep.target_file, viewRootFolder),
+              sourceStartsWithViewRoot: normalizePath(dep.source_file).startsWith(normalizePath(viewRootFolder) + '/'),
+              targetStartsWithViewRoot: normalizePath(dep.target_file).startsWith(normalizePath(viewRootFolder) + '/'),
+            }))
+          });
+        }
+      }
+
+    filteredDeps.forEach((dep, index) => {
       let sourceId, targetId;
 
+      // Since we only show internal dependencies, both source and target are within viewRootFolder
       if (level === 'folder' && folderDepth !== undefined) {
-        // Use specific folder level
-        sourceId = getFolderAtLevel(dep.source_file, folderDepth);
-        targetId = getFolderAtLevel(dep.target_file, folderDepth);
+        // Use specific folder level relative to view root
+        const sourceFullPath = getFolderAtLevelRelativeToViewRoot(dep.source_file, folderDepth, viewRootFolder);
+        const targetFullPath = getFolderAtLevelRelativeToViewRoot(dep.target_file, folderDepth, viewRootFolder);
 
-        // Skip self-dependencies at folder level
-        if (sourceId === targetId) return;
+        sourceId = getRelativeFromViewRoot(sourceFullPath, viewRootFolder);
+        targetId = getRelativeFromViewRoot(targetFullPath, viewRootFolder);
       } else if (level === 'folder') {
-        // Extract folder paths (everything up to the last '/')
-        sourceId = dep.source_file.substring(0, dep.source_file.lastIndexOf('/')) || '/';
-        targetId = dep.target_file.substring(0, dep.target_file.lastIndexOf('/')) || '/';
+        // Extract folder paths relative to view root
+        const sourceFull = dep.source_file.substring(0, dep.source_file.lastIndexOf('/')) || '/';
+        const targetFull = dep.target_file.substring(0, dep.target_file.lastIndexOf('/')) || '/';
 
-        // Skip self-dependencies at folder level
-        if (sourceId === targetId) return;
+        sourceId = getRelativeFromViewRoot(sourceFull, viewRootFolder);
+        targetId = getRelativeFromViewRoot(targetFull, viewRootFolder);
       } else {
-        sourceId = dep.source_file;
-        targetId = dep.target_file;
+        // File level - just use relative file paths
+        sourceId = getRelativeFromViewRoot(dep.source_file, viewRootFolder);
+        targetId = getRelativeFromViewRoot(dep.target_file, viewRootFolder);
       }
+
+      // Skip self-dependencies and invalid IDs
+      if (!sourceId || !targetId || sourceId === targetId) return;
 
       // Create nodes if they don't exist
       if (!nodes.has(sourceId)) {
         const sourceLabel = level === 'folder'
-          ? (sourceId === '/' ? 'root' : sourceId.split('/').pop() || sourceId)
-          : dep.source_file.split('/').pop() || dep.source_file;
+          ? (sourceId === '/' ? (viewRootFolder === '/' ? 'root' : viewRootFolder.split('/').pop() || 'root') : sourceId.split('/').filter(p => p).pop() || sourceId)
+          : (getRelativeFromViewRoot(dep.source_file, viewRootFolder).split('/').pop() || dep.source_file.split('/').pop() || dep.source_file);
 
         nodes.set(sourceId, {
           id: sourceId,
@@ -92,7 +150,7 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
           type: level,
           path: sourceId,
           size: 1,
-          instability: Math.random(), // TODO: Calculate actual instability
+          instability: getConsistentInstability(sourceId),
           parent: level === 'folder' && sourceId.includes('/') && sourceId !== '/'
             ? sourceId.substring(0, sourceId.lastIndexOf('/'))
             : undefined
@@ -101,8 +159,8 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
 
       if (!nodes.has(targetId)) {
         const targetLabel = level === 'folder'
-          ? (targetId === '/' ? 'root' : targetId.split('/').pop() || targetId)
-          : dep.target_file.split('/').pop() || dep.target_file;
+          ? (targetId === '/' ? (viewRootFolder === '/' ? 'root' : viewRootFolder.split('/').pop() || 'root') : targetId.split('/').filter(p => p).pop() || targetId)
+          : (getRelativeFromViewRoot(dep.target_file, viewRootFolder).split('/').pop() || dep.target_file.split('/').pop() || dep.target_file);
 
         nodes.set(targetId, {
           id: targetId,
@@ -110,7 +168,7 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
           type: level,
           path: targetId,
           size: 1,
-          instability: Math.random(), // TODO: Calculate actual instability
+          instability: getConsistentInstability(targetId),
           parent: level === 'folder' && targetId.includes('/') && targetId !== '/'
             ? targetId.substring(0, targetId.lastIndexOf('/'))
             : undefined
@@ -134,10 +192,10 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
           existingEdge.type = `${existingEdge.type}, ${dep.relationship_type}`;
         }
       } else {
-        // Create new edge
+        // Create new edge - we'll resolve source/target references later
         edgeMap.set(edgeKey, {
-          source: sourceId,
-          target: targetId,
+          source: sourceId as any,
+          target: targetId as any,
           weight: 1,
           type: dep.relationship_type,
           originalDependencies: [dep]
@@ -145,212 +203,403 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
       }
     });
 
+    const nodeArray = Array.from(nodes.values());
+    const edgeArray = Array.from(edgeMap.values());
+
+    // Resolve edge source/target references to actual node objects
+    const nodeMap = new Map(nodeArray.map(n => [n.id, n]));
+    const resolvedEdges = edgeArray.map(edge => ({
+      ...edge,
+      source: nodeMap.get(edge.source as string)!,
+      target: nodeMap.get(edge.target as string)!
+    }));
+
     return {
-      nodes: Array.from(nodes.values()),
-      edges: Array.from(edgeMap.values())
+      nodes: nodeArray,
+      edges: resolvedEdges
     };
+    } catch (error) {
+      console.error('❌ Error in transformToGraphData:', error);
+      console.error('Error details:', {
+        viewRootFolder,
+        level,
+        folderDepth,
+        depsCount: deps.length,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+
+      // Return empty graph data on error
+      return {
+        nodes: [],
+        edges: []
+      };
+    }
   };
 
-  // Initialize Cytoscape
+  // Initialize D3.js graph
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !dependencies || dependencies.length === 0) {
+      console.log('⚠️ Skipping D3 initialization:', {
+        containerAvailable: !!containerRef.current,
+        dependenciesCount: dependencies?.length || 0
+      });
+      return;
+    }
 
-    const { nodes, edges } = transformToGraphData(
-      dependencies,
-      levelOfDetail,
-      levelOfDetail === 'folder' ? folderLevel : undefined
-    );
+    try {
+      const { nodes, edges } = transformToGraphData(
+        dependencies,
+        levelOfDetail,
+        levelOfDetail === 'folder' ? folderLevel : undefined
+      );
 
-    // Convert to Cytoscape format
-    const elements = [
-      ...nodes.map(node => ({
-        data: {
-          id: node.id,
-          label: node.label,
-          type: node.type,
-          size: node.size,
-          instability: node.instability,
-          parent: node.parent
-        },
-        classes: node.type
-      })),
-      ...edges.map((edge, index) => ({
-        data: {
-          id: `edge-${index}`,
-          source: edge.source,
-          target: edge.target,
-          weight: edge.weight,
-          type: edge.type,
-          originalDependencies: edge.originalDependencies
-        }
-      }))
-    ];
+      console.log('📊 Graph data generated:', { nodesCount: nodes.length, edgesCount: edges.length, viewRootFolder });
 
-    // Cytoscape configuration
-    const cy = cytoscape({
-      container: containerRef.current,
-      elements,
-      style: [
-        // Node styles
-        {
-          selector: 'node',
-          style: {
-            'background-color': (node: any) => {
-              const instability = node.data('instability');
-              // Color coding: green (stable) to red (unstable)
-              if (instability < 0.3) return '#22c55e'; // Green
-              if (instability < 0.7) return '#f59e0b'; // Yellow
-              return '#ef4444'; // Red
-            },
-            'label': 'data(label)',
-            'width': (node: any) => Math.max(30, Math.min(100, node.data('size') * 8)),
-            'height': (node: any) => Math.max(30, Math.min(100, node.data('size') * 8)),
-            'font-size': '12px',
-            'text-valign': 'center',
-            'text-halign': 'center',
-            'overlay-opacity': 0
-          }
-        },
-        // Folder-specific styles
-        {
-          selector: 'node.folder',
-          style: {
-            'shape': 'round-rectangle',
-            'border-width': 2,
-            'border-color': '#64748b'
-          }
-        },
-        // File-specific styles
-        {
-          selector: 'node.file',
-          style: {
-            'shape': 'ellipse'
-          }
-        },
-        // Edge styles
-        {
-          selector: 'edge',
-          style: {
-            'width': (edge: any) => Math.max(1, Math.min(10, edge.data('weight') * 2)),
-            'line-color': (edge: any) => {
-              const weight = edge.data('weight');
-              // Color intensity based on weight: lighter for single, darker for multiple
-              if (weight === 1) return '#cbd5e1'; // Light gray for single dependencies
-              if (weight <= 5) return '#94a3b8';  // Medium gray for moderate
-              if (weight <= 10) return '#64748b'; // Darker gray for many
-              return '#475569'; // Very dark gray for heavy dependencies
-            },
-            'target-arrow-color': (edge: any) => {
-              const weight = edge.data('weight');
-              if (weight === 1) return '#cbd5e1';
-              if (weight <= 5) return '#94a3b8';
-              if (weight <= 10) return '#64748b';
-              return '#475569';
-            },
-            'target-arrow-shape': 'triangle',
-            'arrow-scale': (edge: any) => Math.max(1, Math.min(2, 1 + edge.data('weight') * 0.1)),
-            'curve-style': 'bezier',
-            'overlay-opacity': 0
-          }
-        },
-        // Selected node styles
-        {
-          selector: 'node:selected',
-          style: {
-            'border-width': 4,
-            'border-color': '#2563eb'
-          }
-        },
-        // Highlighted edges (connected to selected node)
-        {
-          selector: 'edge.highlighted',
-          style: {
-            'line-color': '#2563eb',
-            'target-arrow-color': '#2563eb',
-            'width': (edge: any) => Math.max(2, Math.min(12, edge.data('weight') * 3))
-          }
-        }
-      ],
-      layout: {
-        name: 'cose', // Force-directed layout
-        idealEdgeLength: 100,
-        nodeOverlap: 20,
-        refresh: 20,
-        fit: true,
-        padding: 30,
-        randomize: false,
-        componentSpacing: 100,
-        nodeRepulsion: 400000,
-        edgeElasticity: 100,
-        nestingFactor: 5,
-        gravity: 80,
-        numIter: 1000,
-        initialTemp: 200,
-        coolingFactor: 0.95,
-        minTemp: 1.0
-      },
-      wheelSensitivity: 0.2,
-      minZoom: 0.1,
-      maxZoom: 3
-    });
+      // Clear previous SVG first
+      d3.select(containerRef.current).selectAll('svg').remove();
 
-    // Store reference
-    cyRef.current = cy;
+      // Don't create graph if no data - but leave empty canvas
+      if (nodes.length === 0) {
+        console.log('⚠️ No nodes to display, creating empty canvas');
 
-    // Event handlers
-    cy.on('tap', 'node', (evt) => {
-      const node = evt.target;
-      const nodeId = node.id();
+        // Create empty SVG for consistent UI
+        const width = containerRef.current.clientWidth;
+        const height = 600;
+        const svg = d3.select(containerRef.current)
+          .append('svg')
+          .attr('width', width)
+          .attr('height', height)
+          .attr('viewBox', `0 0 ${width} ${height}`);
 
-      // Clear previous highlights
-      cy.elements().removeClass('highlighted');
+        // Add a message for empty state
+        svg.append('text')
+          .attr('x', width / 2)
+          .attr('y', height / 2)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', '16px')
+          .attr('font-family', 'system-ui, -apple-system, sans-serif')
+          .attr('fill', '#64748b')
+          .text(`No dependencies found within "${viewRootFolder === '/' ? 'root' : viewRootFolder.split(/[/\\]/).pop()}"`);
 
-      // Highlight connected edges
-      node.connectedEdges().addClass('highlighted');
-
-      setSelectedNode(nodeId);
-      onNodeSelect?.(nodeId);
-    });
-
-    cy.on('tap', (evt) => {
-      if (evt.target === cy) {
-        // Clicked on background - clear selection
-        cy.elements().removeClass('highlighted');
-        setSelectedNode(null);
-        onNodeSelect?.(null);
+        return;
       }
-    });
 
-    // Double-click handler for edges
-    cy.on('dblclick', 'edge', (evt) => {
-      const edge = evt.target;
-      const sourceId = edge.data('source');
-      const targetId = edge.data('target');
-      const originalDependencies = edge.data('originalDependencies') as Dependency[];
 
-      if (onEdgeDoubleClick && originalDependencies) {
-        // Extract unique relationship types
-        const relationshipTypes = [...new Set(originalDependencies.map(dep => dep.relationship_type))];
-        onEdgeDoubleClick(sourceId, targetId, relationshipTypes);
+      // Create SVG
+      const width = containerRef.current.clientWidth;
+      const height = 600;
+
+      const svg = d3.select(containerRef.current)
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height)
+        .attr('viewBox', `0 0 ${width} ${height}`);
+
+      svgRef.current = svg.node();
+
+      // Create zoom behavior
+      const zoom = d3.zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.1, 3])
+        .on('zoom', (event) => {
+          container.attr('transform', event.transform);
+        });
+
+      svg.call(zoom);
+
+      // Create arrowhead marker FIRST
+      const defs = svg.append('defs');
+      defs.append('marker')
+        .attr('id', 'arrowhead')
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 15)
+        .attr('refY', 0)
+        .attr('markerWidth', 3)
+        .attr('markerHeight', 3)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-5L10,0L0,5')
+        .attr('fill', '#94a3b8');
+
+      // Create container for all graph elements
+      const container = svg.append('g');
+
+      // Create force simulation
+      const simulation = d3.forceSimulation<GraphNode, GraphEdge>(nodes)
+        .force('link', d3.forceLink<GraphNode, GraphEdge>(edges).id(d => d.id).distance(150).strength(0.5))
+        .force('charge', d3.forceManyBody().strength(-800))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(d => Math.max(25, Math.min(45, Math.sqrt(d.size) * 8 + 5))))
+        .force('x', d3.forceX(width / 2).strength(0.1))
+        .force('y', d3.forceY(height / 2).strength(0.1));
+
+      simulationRef.current = simulation;
+
+      // Color scale for node instability
+      const getNodeColor = (instability: number) => {
+        if (instability < 0.3) return '#22c55e'; // Green - stable
+        if (instability < 0.7) return '#f59e0b'; // Orange - moderate
+        return '#ef4444'; // Red - unstable
+      };
+
+      console.log('🎨 Creating graph elements:', { nodeCount: nodes.length, edgeCount: edges.length });
+
+      // Create links (edges) FIRST so they appear behind nodes
+      const link = container.append('g')
+        .attr('class', 'links')
+        .selectAll('line')
+        .data(edges)
+        .enter().append('line')
+        .attr('class', 'edge')
+        .attr('stroke', '#94a3b8')
+        .attr('stroke-width', d => Math.max(1.5, Math.min(4, d.weight)))
+        .attr('stroke-opacity', 0.7)
+        .attr('marker-end', 'url(#arrowhead)');
+
+      // Create nodes AFTER edges so they appear on top
+      const node = container.append('g')
+        .attr('class', 'nodes')
+        .selectAll('g')
+        .data(nodes)
+        .enter().append('g')
+        .attr('class', 'node')
+        .call(d3.drag<SVGGElement, GraphNode>()
+          .on('start', dragstarted)
+          .on('drag', dragged)
+          .on('end', dragended));
+
+      console.log('🔗 Created', link.size(), 'edges and', node.size(), 'nodes');
+
+      // Add circles to nodes
+      const circles = node.append('circle')
+        .attr('r', d => Math.max(20, Math.min(40, Math.sqrt(d.size) * 8)))
+        .attr('fill', d => getNodeColor(d.instability))
+        .attr('stroke', d => d.type === 'folder' ? '#64748b' : '#ffffff')
+        .attr('stroke-width', d => d.type === 'folder' ? 3 : 1)
+        .attr('opacity', 0.9);
+
+      console.log('⭕ Created', circles.size(), 'circles');
+
+      // Add labels to nodes
+      node.append('text')
+        .text(d => {
+          // Truncate long labels
+          const label = d.label || d.id;
+          return label.length > 12 ? label.substring(0, 12) + '...' : label;
+        })
+        .attr('text-anchor', 'middle')
+        .attr('dy', '0.35em')
+        .attr('font-size', '11px')
+        .attr('font-family', 'system-ui, -apple-system, sans-serif')
+        .attr('font-weight', '500')
+        .attr('fill', '#ffffff')
+        .attr('stroke', '#000000')
+        .attr('stroke-width', '0.5px')
+        .attr('paint-order', 'stroke fill')
+        .attr('pointer-events', 'none');
+
+      // Node click handlers
+      node.on('click', function(event, d) {
+        // Clear previous highlights
+        node.select('circle')
+          .attr('stroke', n => n.type === 'folder' ? '#64748b' : '#ffffff')
+          .attr('stroke-width', n => n.type === 'folder' ? 3 : 1);
+        link
+          .attr('stroke', '#94a3b8')
+          .attr('stroke-width', e => Math.max(1.5, Math.min(4, e.weight)))
+          .attr('stroke-opacity', 0.7);
+
+        // Highlight selected node and connected edges
+        d3.select(this).select('circle')
+          .attr('stroke', '#2563eb')
+          .attr('stroke-width', 4);
+
+        // Highlight connected edges
+        link.filter(l => l.source.id === d.id || l.target.id === d.id)
+          .attr('stroke', '#2563eb')
+          .attr('stroke-width', 4)
+          .attr('stroke-opacity', 1);
+
+        setSelectedNode(d.id);
+        onNodeSelect?.(d.id);
+      });
+
+      // Double-click handler for folder navigation
+      node.on('dblclick', function(event, d) {
+        event.stopPropagation();
+
+        if (d.type === 'folder' && d.id !== '/') {
+          // Calculate the absolute path for the folder to zoom into
+          let absolutePath;
+
+          if (viewRootFolder === '/') {
+            // We're at root level, so node.id is already the full path
+            absolutePath = d.id;
+          } else {
+            // We're in a subfolder, need to construct the full absolute path
+            // d.id is relative to current viewRoot, so prepend the viewRoot
+            if (d.id.startsWith('/')) {
+              // If nodeId already starts with '/', it's relative from viewRoot
+              absolutePath = `${viewRootFolder}${d.id}`;
+            } else {
+              // If nodeId doesn't start with '/', add a separator
+              absolutePath = `${viewRootFolder}/${d.id}`;
+            }
+          }
+
+          // Normalize path separators to forward slashes and clean up
+          absolutePath = absolutePath.replace(/\\/g, '/').replace(/\/+/g, '/');
+
+          // Remove trailing slash if any
+          if (absolutePath !== '/' && absolutePath.endsWith('/')) {
+            absolutePath = absolutePath.slice(0, -1);
+          }
+
+          console.log('📁 Zooming into folder:', {
+            nodeId: d.id,
+            nodeType: d.type,
+            currentViewRoot: viewRootFolder,
+            calculatedAbsolutePath: absolutePath
+          });
+
+          setViewRootFolder(absolutePath);
+          setSelectedNode(null);
+          // Reset folder level to 1 when changing view root
+          setFolderLevel(1);
+        } else {
+          console.log('⚠️ Skipping zoom - not a valid folder:', {
+            nodeId: d.id,
+            nodeType: d.type
+          });
+        }
+      });
+
+      // Edge double-click handler
+      link.on('dblclick', function(event, d) {
+        if (onEdgeDoubleClick && d.originalDependencies) {
+          const relationshipTypes = [...new Set(d.originalDependencies.map(dep => dep.relationship_type))];
+          onEdgeDoubleClick(d.source.id, d.target.id, relationshipTypes);
+        }
+      });
+
+      // Background click to clear selection
+      svg.on('click', function(event) {
+        if (event.target === this) {
+          node.select('circle')
+            .attr('stroke', n => n.type === 'folder' ? '#64748b' : '#ffffff')
+            .attr('stroke-width', n => n.type === 'folder' ? 3 : 1);
+          link
+            .attr('stroke', '#94a3b8')
+            .attr('stroke-width', e => Math.max(1.5, Math.min(4, e.weight)))
+            .attr('stroke-opacity', 0.7);
+          setSelectedNode(null);
+          onNodeSelect?.(null);
+        }
+      });
+
+      // Simulation tick function
+      simulation.on('tick', () => {
+        // Position edges from edge to edge of circles, not center to center
+        link
+          .attr('x1', d => {
+            const dx = d.target.x! - d.source.x!;
+            const dy = d.target.y! - d.source.y!;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const sourceRadius = Math.max(20, Math.min(40, Math.sqrt(d.source.size) * 8));
+            return d.source.x! + (dx / dist) * sourceRadius;
+          })
+          .attr('y1', d => {
+            const dx = d.target.x! - d.source.x!;
+            const dy = d.target.y! - d.source.y!;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const sourceRadius = Math.max(20, Math.min(40, Math.sqrt(d.source.size) * 8));
+            return d.source.y! + (dy / dist) * sourceRadius;
+          })
+          .attr('x2', d => {
+            const dx = d.source.x! - d.target.x!;
+            const dy = d.source.y! - d.target.y!;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const targetRadius = Math.max(20, Math.min(40, Math.sqrt(d.target.size) * 8));
+            return d.target.x! + (dx / dist) * targetRadius;
+          })
+          .attr('y2', d => {
+            const dx = d.source.x! - d.target.x!;
+            const dy = d.source.y! - d.target.y!;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const targetRadius = Math.max(20, Math.min(40, Math.sqrt(d.target.size) * 8));
+            return d.target.y! + (dy / dist) * targetRadius;
+          });
+
+        node
+          .attr('transform', d => `translate(${d.x},${d.y})`);
+      });
+
+      // Drag functions
+      function dragstarted(event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
       }
-    });
 
-    // Fit to view
-    cy.fit();
+      function dragged(event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
 
-    // Cleanup
-    return () => {
-      cyRef.current?.destroy();
-      cyRef.current = null;
-    };
-  }, [dependencies, levelOfDetail, folderLevel, onNodeSelect, onEdgeDoubleClick]);
+      function dragended(event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+
+      console.log('✅ D3.js graph fully initialized and ready');
+
+      // Cleanup
+      return () => {
+        simulation.stop();
+        simulationRef.current = null;
+      };
+    } catch (error) {
+      console.error('❌ Error initializing D3.js graph:', error);
+      console.error('D3.js Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        viewRootFolder,
+        levelOfDetail,
+        folderLevel,
+        dependenciesCount: dependencies.length
+      });
+    }
+  }, [dependencies, levelOfDetail, folderLevel, viewRootFolder, onNodeSelect, onEdgeDoubleClick]);
 
   const fitToView = () => {
-    cyRef.current?.fit();
+    if (svgRef.current && simulationRef.current) {
+      const svg = d3.select(svgRef.current);
+      const bounds = (svg.select('g').node() as SVGGElement)?.getBBox();
+      if (bounds) {
+        const width = +svg.attr('width');
+        const height = +svg.attr('height');
+        const scale = Math.min(width / bounds.width, height / bounds.height) * 0.9;
+        const translateX = width / 2 - scale * (bounds.x + bounds.width / 2);
+        const translateY = height / 2 - scale * (bounds.y + bounds.height / 2);
+
+        svg.transition().duration(750)
+          .call(d3.zoom<SVGSVGElement, unknown>().transform as any,
+                d3.zoomIdentity.translate(translateX, translateY).scale(scale));
+      }
+    }
   };
 
   const centerView = () => {
-    cyRef.current?.center();
+    if (svgRef.current) {
+      const svg = d3.select(svgRef.current);
+      const width = +svg.attr('width');
+      const height = +svg.attr('height');
+
+      svg.transition().duration(750)
+        .call(d3.zoom<SVGSVGElement, unknown>().transform as any,
+              d3.zoomIdentity.translate(width / 2, height / 2).scale(1));
+    }
   };
 
   return (
@@ -364,6 +613,17 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
           <button onClick={centerView} className="control-btn">
             🎯 Center
           </button>
+
+          {/* Navigation Controls */}
+          {viewRootFolder !== '/' && (
+            <button
+              onClick={() => setViewRootFolder(getParentFolder(viewRootFolder))}
+              className="control-btn go-up-btn"
+              title={`Go up to ${getParentFolder(viewRootFolder)}`}
+            >
+              ⬆️ Go Up
+            </button>
+          )}
 
           {levelOfDetail === 'folder' && (
             <div className="folder-level-control">
@@ -390,6 +650,7 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
             </span>
           ) : (
             <span className="graph-stats">
+              📁 <strong>{viewRootFolder === '/' ? 'Root' : viewRootFolder.split('/').pop()}</strong> •{' '}
               {dependencies.length} dependencies • {levelOfDetail} level
               {levelOfDetail === 'folder' && ` • folder level ${folderLevel}`}
             </span>
@@ -455,6 +716,18 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
         .control-btn:hover {
           border-color: #2563eb;
           color: #2563eb;
+        }
+
+        .go-up-btn {
+          background: #f0f9ff;
+          border-color: #0ea5e9;
+          color: #0369a1;
+        }
+
+        .go-up-btn:hover {
+          background: #e0f2fe;
+          border-color: #0284c7;
+          color: #0c4a6e;
         }
 
         .folder-level-control {

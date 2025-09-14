@@ -60,26 +60,85 @@ function App() {
 
   const fetchResults = async () => {
     if (isWebVersion) {
-      // In web version, show sample data
+      // In web version, show sample data with realistic Flutter/Dart structure
+      console.log('🌐 Web version: Generating sample data');
       setSnapshots([
         {
-          commit_hash: 'abc123',
+          commit_hash: 'sample-web-commit',
           timestamp: Date.now(),
-          dependencies: Array.from({length: 546}, (_, i) => ({
-            source_file: `lib/module${i % 20}.dart`,
-            target_file: `lib/service${(i + 1) % 15}.dart`,
-            relationship_type: ['imports', 'extends', 'implements'][i % 3],
-            weight: Math.floor(Math.random() * 10) + 1
-          }))
+          commit_info: {
+            hash: 'sample-web-commit',
+            message: 'Sample Flutter/Dart project structure',
+            author: 'Web Demo',
+            timestamp: Date.now()
+          },
+          dependencies: [
+            // Main app structure
+            { source_file: 'lib/main.dart', target_file: 'lib/app.dart', relationship_type: 'imports', weight: 1 },
+            { source_file: 'lib/app.dart', target_file: 'lib/config/routes.dart', relationship_type: 'imports', weight: 1 },
+            { source_file: 'lib/app.dart', target_file: 'lib/config/theme.dart', relationship_type: 'imports', weight: 1 },
+
+            // Data layer
+            { source_file: 'lib/data/repositories/user_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 2 },
+            { source_file: 'lib/data/repositories/auth_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 3 },
+            { source_file: 'lib/data/services/api_service.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1 },
+
+            // UI layer
+            { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/ui/widgets/user_card.dart', relationship_type: 'imports', weight: 2 },
+            { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/data/repositories/user_repository.dart', relationship_type: 'imports', weight: 1 },
+            { source_file: 'lib/ui/screens/login_screen.dart', target_file: 'lib/data/repositories/auth_repository.dart', relationship_type: 'imports', weight: 1 },
+            { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1 },
+
+            // Utils and config
+            { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/home_screen.dart', relationship_type: 'imports', weight: 1 },
+            { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1 },
+            { source_file: 'lib/utils/validators.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1 },
+
+            // Cross-dependencies
+            { source_file: 'lib/data/models/user.dart', target_file: 'lib/utils/json_serializable.dart', relationship_type: 'implements', weight: 1 },
+            { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/ui/widgets/base_card.dart', relationship_type: 'extends', weight: 1 },
+          ],
+          analysis_result: {
+            analyzed_files: [
+              'lib/main.dart', 'lib/app.dart', 'lib/config/routes.dart', 'lib/config/theme.dart',
+              'lib/data/repositories/user_repository.dart', 'lib/data/repositories/auth_repository.dart',
+              'lib/data/services/api_service.dart', 'lib/data/models/user.dart', 'lib/ui/screens/home_screen.dart',
+              'lib/ui/screens/login_screen.dart', 'lib/ui/widgets/user_card.dart', 'lib/ui/widgets/base_card.dart',
+              'lib/config/routes.dart', 'lib/utils/validators.dart', 'lib/utils/json_serializable.dart'
+            ],
+            dependencies: [
+              { source_file: 'lib/main.dart', target_file: 'lib/app.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/app.dart', target_file: 'lib/config/routes.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/app.dart', target_file: 'lib/config/theme.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/data/repositories/user_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 2 },
+              { source_file: 'lib/data/repositories/auth_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 3 },
+              { source_file: 'lib/data/services/api_service.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/ui/widgets/user_card.dart', relationship_type: 'imports', weight: 2 },
+              { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/data/repositories/user_repository.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/ui/screens/login_screen.dart', target_file: 'lib/data/repositories/auth_repository.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/home_screen.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/utils/validators.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1 },
+              { source_file: 'lib/data/models/user.dart', target_file: 'lib/utils/json_serializable.dart', relationship_type: 'implements', weight: 1 },
+              { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/ui/widgets/base_card.dart', relationship_type: 'extends', weight: 1 },
+            ],
+            metrics: {
+              analysis_duration_ms: 1500,
+              total_files: 15,
+              total_dependencies: 15
+            }
+          }
         }
       ]);
       setStatistics({
-        total_files: 125,
-        total_dependencies: 546,
-        average_dependencies_per_file: 4.4,
-        cycles_detected: 12,
-        instability_score: 0.67
+        total_files: 15,
+        total_dependencies: 15,
+        average_dependencies_per_file: 1.0,
+        cycles_detected: 0,
+        instability_score: 0.45
       });
+      console.log('✅ Web version: Sample data generated');
       return;
     }
 
@@ -107,17 +166,23 @@ function App() {
 
     if (isWebVersion) {
       // In web version, simulate analysis with sample data
-      setAnalysisLogs(['🌐 Web version detected - showing sample data']);
+      console.log('🌐 Web version: Starting analysis simulation');
+      setAnalysisLogs(['🌐 Web version detected - showing sample data', '📁 Simulating Flutter/Dart project analysis']);
+
       setTimeout(() => {
+        console.log('🌐 Web version: Setting progress');
         setProgress({
           phase: 'Analyzing dependencies',
           current_commit: 1,
           total_commits: 1,
           current_commit_hash: 'sample-web-data'
         });
+        setAnalysisLogs(prev => [...prev, '🔍 Analyzing project structure', '📊 Processing dependencies']);
       }, 1000);
 
       setTimeout(() => {
+        console.log('🌐 Web version: Completing analysis');
+        setAnalysisLogs(prev => [...prev, '✅ Analysis complete - displaying results']);
         setIsAnalyzing(false);
         fetchResults();
       }, 3000);

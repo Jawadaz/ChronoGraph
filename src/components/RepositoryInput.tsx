@@ -21,8 +21,8 @@ export const RepositoryInput: React.FC<RepositoryInputProps> = ({ onAnalysisStar
 
   const checkLakosAvailability = async () => {
     if (!isTauri) {
-      console.log('Not in Tauri environment - using mock data');
-      setLakosAvailable(false);
+      console.log('Web version - enabling sample data analysis');
+      setLakosAvailable(true); // Allow web version to work with sample data
       return;
     }
     
@@ -88,6 +88,8 @@ export const RepositoryInput: React.FC<RepositoryInputProps> = ({ onAnalysisStar
       <div className="lakos-status">
         {lakosAvailable === null ? (
           <div className="status checking">🔍 Checking Lakos availability...</div>
+        ) : lakosAvailable && !isTauri ? (
+          <div className="status available">🌐 Web demo mode - using sample data</div>
         ) : lakosAvailable ? (
           <div className="status available">✅ Lakos analyzer ready</div>
         ) : (

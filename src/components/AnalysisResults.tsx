@@ -337,6 +337,23 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
               </div>
             </div>
 
+            {/* Edge Filter Display - Compact */}
+            {edgeFilter && (
+              <div className="edge-filter-compact">
+                <span className="filter-badge">
+                  🔍 {edgeFilter.sourceId.split('/').pop()} → {edgeFilter.targetId.split('/').pop()}
+                  <span className="filter-type-badge">({edgeFilter.relationshipTypes.join(', ')})</span>
+                </span>
+                <button
+                  className="clear-filter-compact"
+                  onClick={() => setEdgeFilter(null)}
+                  title="Clear filter"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
             {/* Stats */}
             <div className="dependencies-stats">
               Showing {depData.displayed.length} of {depData.total} dependencies
@@ -410,6 +427,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
             dependencies={selectedCommit.analysis_result.dependencies}
             levelOfDetail={levelOfDetail}
             onNodeSelect={setSelectedGraphNode}
+            onEdgeDoubleClick={handleEdgeDoubleClick}
           />
         </div>
       )}
@@ -780,6 +798,51 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           padding: 6px 12px;
           background: #eff6ff;
           border-radius: 6px;
+        }
+
+        .edge-filter-compact {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 8px 0;
+          padding: 6px 12px;
+          background: #f0f9ff;
+          border: 1px solid #0ea5e9;
+          border-radius: 6px;
+          font-size: 14px;
+        }
+
+        .filter-badge {
+          color: #0369a1;
+          font-weight: 500;
+        }
+
+        .filter-type-badge {
+          color: #64748b;
+          font-weight: 400;
+          margin-left: 4px;
+        }
+
+        .clear-filter-compact {
+          background: #ef4444;
+          color: white;
+          border: none;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: bold;
+          transition: all 0.2s;
+          flex-shrink: 0;
+        }
+
+        .clear-filter-compact:hover {
+          background: #dc2626;
+          transform: scale(1.1);
         }
       `}</style>
     </div>
