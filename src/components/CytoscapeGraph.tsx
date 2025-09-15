@@ -5,7 +5,6 @@ import fcose from 'cytoscape-fcose';
 
 import {
   transformToHierarchicalElements,
-  toggleFolderExpansion,
   CytoscapeElement,
   FolderState
 } from '../utils/cytoscapeTransforms';
@@ -73,7 +72,14 @@ export const CytoscapeGraph: React.FC<CytoscapeGraphProps> = ({
         nodeDimensionsIncludeLabels: true,
         animate: true,
         animationDuration: 500,
-        fit: true
+        fit: true,
+        // Enhanced compound node support
+        rankDir: 'TB',
+        edgeWeight: function(edge: any) { return edge.data('weight'); },
+        // Compound-specific options
+        rankSep: 50,
+        nodeSep: 30,
+        edgeSep: 10
       },
 
       // Interaction settings
@@ -149,18 +155,62 @@ export const CytoscapeGraph: React.FC<CytoscapeGraphProps> = ({
       const nodeData = node.data();
 
       if (nodeData.type === 'folder') {
-        const { elements, folderState: newFolderState, shouldRelayout } = toggleFolderExpansion(
-          nodeData.id,
-          [], // We'll regenerate from dependencies
+        console.log('📁 Double-clicked folder:', nodeData.id, 'current state:', nodeData.isExpanded);
+
+        // Toggle expansion state in folderState
+        const newFolderState = { ...folderState };
+        if (!newFolderState[nodeData.id]) {
+          newFolderState[nodeData.id] = {
+            isExpanded: false, // Initialize as collapsed
+            children: [],
+            path: nodeData.id
+          };
+        }
+        // Toggle: if currently collapsed (false) or undefined, expand (true)
+        newFolderState[nodeData.id].isExpanded = !newFolderState[nodeData.id].isExpanded;
+
+        console.log('📁 Toggling folder:', {
+          folderId: nodeData.id,
+          nodeType: nodeData.type,
+          isLeaf: nodeData.isLeaf,
+          oldState: folderState[nodeData.id]?.isExpanded,
+          newState: newFolderState[nodeData.id].isExpanded,
+          existingFolderState: !!folderState[nodeData.id],
+          allFolderStateKeys: Object.keys(folderState)
+        });
+
+        // Re-transform dependencies with new folder state
+        const { elements } = transformToHierarchicalElements(
           dependencies,
           viewRootFolder,
           folderLevel,
-          folderState
+          newFolderState
         );
 
+        // Update folder state
         setFolderState(newFolderState);
 
-        console.log('📁 Toggled folder:', nodeData.id, 'shouldRelayout:', shouldRelayout);
+        // Update Cytoscape with new elements
+        console.log('🔄 Updating Cytoscape with new elements:', elements.length);
+        cy.elements().remove();
+        cy.add(elements as any);
+
+        // Re-run layout with compound support
+        cy.layout({
+          name: 'dagre',
+          directed: true,
+          padding: 20,
+          spacingFactor: 1.25,
+          animate: true,
+          animationDuration: 500,
+          fit: true,
+          // Dagre compound node support
+          rankDir: 'TB',
+          nodeDimensionsIncludeLabels: true,
+          edgeWeight: function(edge: any) { return edge.data('weight'); }
+        }).run();
+
+        console.log('✅ Folder expansion toggle completed');
       }
     });
 
@@ -306,16 +356,16 @@ export const CytoscapeGraph: React.FC<CytoscapeGraphProps> = ({
 };
 
 /**
- * Cytoscape.js styles based on Context7 patterns
+ * Cytoscape.js styles for compound hierarchical nodes
  */
 const getCytoscapeStyles = () => [
-  // File nodes (leaf nodes)
+  // File nodes (always leaf nodes)
   {
     selector: 'node[type="file"]',
     style: {
       'shape': 'ellipse',
-      'width': '30px',
-      'height': '30px',
+      'width': '32px',
+      'height': '32px',
       'background-color': (ele: any) => getNodeColor(ele.data('instability')),
       'label': 'data(label)',
       'font-size': '10px',
@@ -323,48 +373,80 @@ const getCytoscapeStyles = () => [
       'text-halign': 'center',
       'color': '#ffffff',
       'text-outline-width': '1px',
-      'text-outline-color': '#000000'
+      'text-outline-color': '#000000',
+      'z-index': 2
     }
   },
 
-  // Folder nodes (collapsed) - act as leaf nodes
+  // Collapsed folder nodes (act as leaf nodes)
   {
-    selector: 'node[type="folder"][?isLeaf]',
+    selector: 'node[type="folder"].collapsed',
     style: {
       'shape': 'round-rectangle',
-      'width': '40px',
-      'height': '30px',
+      'width': '50px',
+      'height': '35px',
       'background-color': (ele: any) => getNodeColor(ele.data('instability')),
       'border-width': '2px',
       'border-color': '#64748b',
+      'border-style': 'solid',
       'label': 'data(label)',
       'font-size': '10px',
       'text-valign': 'center',
       'text-halign': 'center',
       'color': '#ffffff',
       'text-outline-width': '1px',
-      'text-outline-color': '#000000'
+      'text-outline-color': '#000000',
+      'z-index': 2
     }
   },
 
-  // Compound parent nodes (expanded folders) - Context7 pattern
+  // Expanded folder nodes (container parents)
+  {
+    selector: 'node[type="folder"].expanded',
+    style: {
+      'shape': 'round-rectangle',
+      'background-color': '#f8fafc',
+      'background-opacity': 0.4,
+      'border-width': '2px',
+      'border-color': '#94a3b8',
+      'border-style': 'dashed',
+      'label': 'data(label)',
+      'font-size': '12px',
+      'font-weight': '600',
+      'text-valign': 'top',
+      'text-halign': 'center',
+      'text-margin-y': '8px',
+      'color': '#374151',
+      'compound-sizing-wrt-labels': 'include',
+      'min-width': '100px',
+      'min-height': '60px',
+      'padding': '15px',
+      'z-index': 1
+    }
+  },
+
+  // Alternative selector for parent nodes (Cytoscape compound pattern)
   {
     selector: ':parent',
     style: {
       'shape': 'round-rectangle',
       'background-color': '#f8fafc',
-      'background-opacity': 0.3,
+      'background-opacity': 0.4,
       'border-width': '2px',
-      'border-color': '#cbd5e1',
+      'border-color': '#94a3b8',
       'border-style': 'dashed',
       'label': 'data(label)',
       'font-size': '12px',
+      'font-weight': '600',
       'text-valign': 'top',
       'text-halign': 'center',
+      'text-margin-y': '8px',
+      'color': '#374151',
       'compound-sizing-wrt-labels': 'include',
-      'min-width': '80px',
-      'min-height': '50px',
-      'padding': '10px'
+      'min-width': '100px',
+      'min-height': '60px',
+      'padding': '15px',
+      'z-index': 1
     }
   },
 
@@ -372,12 +454,13 @@ const getCytoscapeStyles = () => [
   {
     selector: 'edge',
     style: {
-      'width': (ele: any) => Math.max(1, Math.min(4, ele.data('weight'))),
+      'width': (ele: any) => Math.max(1.5, Math.min(4, ele.data('weight'))),
       'line-color': '#94a3b8',
       'target-arrow-color': '#94a3b8',
       'target-arrow-shape': 'triangle',
       'curve-style': 'bezier',
-      'arrow-scale': 1
+      'arrow-scale': 1.2,
+      'z-index': 3
     }
   },
 
@@ -387,6 +470,33 @@ const getCytoscapeStyles = () => [
     style: {
       'border-width': '3px',
       'border-color': '#2563eb'
+    }
+  },
+
+  // Hover effects for interactive elements
+  {
+    selector: 'node[type="folder"]:active',
+    style: {
+      'border-color': '#2563eb',
+      'border-width': '3px'
+    }
+  },
+
+  // Container class styling
+  {
+    selector: '.container',
+    style: {
+      'background-color': '#f1f5f9',
+      'background-opacity': 0.5
+    }
+  },
+
+  // Leaf class styling
+  {
+    selector: '.leaf',
+    style: {
+      'overlay-opacity': 0,
+      'overlay-color': '#transparent'
     }
   }
 ];
