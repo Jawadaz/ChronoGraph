@@ -28,6 +28,7 @@ export function transformToTreeBasedGraphElements(
     sampleTreeNodes: Array.from(treeNodes.entries()).slice(0, 3).map(([id, node]) => ({id, label: node.label, type: node.type}))
   });
 
+
   // Process each dependency
   dependencies.forEach((dep, index) => {
     const sourcePath = normalizePath(dep.source_file);
@@ -130,9 +131,8 @@ function getTreeFilteringInfo(treeNodes: Map<string, TreeNode>): {
 
       case 'half-checked':
         includedPaths.add(node.id);
-        if (node.type === 'folder') {
-          collapsedFolders.add(node.id);
-        }
+        // Half-checked folders should show as individual nodes, not collapsed containers
+        // They participate in the graph as their own entities
         break;
 
       case 'unchecked':
@@ -160,58 +160,160 @@ function createTreeBasedNode(
 
   console.log('🔍 Creating tree-based node for:', filePath, 'pathParts:', pathParts);
 
-  // Find the appropriate tree node that contains this file
+  // Find the most appropriate display level for this file path
+  // Priority: half-checked nodes > expanded folders > collapsed folders
   let leafNodeId: string | null = null;
-  let bestMatchingTreeNode: TreeNode | null = null;
+  let displayLevel: string | null = null;
 
-  // Look for the deepest tree node that contains this file path
-  for (const [treeNodeId, treeNode] of treeNodes.entries()) {
-    if (treeNodeId === 'project') continue; // Skip root
-
-    // Check if this tree node is an ancestor of or matches the file path
-    const treeNodeParts = treeNodeId.split('/').filter(part => part.length > 0);
-
-    // Check if file path starts with this tree node path
-    if (pathParts.length >= treeNodeParts.length) {
-      const matches = treeNodeParts.every((part, index) => pathParts[index] === part);
-
-      if (matches && includedPaths.has(treeNodeId)) {
-        // This tree node contains our file and is included
-        if (!bestMatchingTreeNode || treeNodeParts.length > bestMatchingTreeNode.id.split('/').length) {
-          bestMatchingTreeNode = treeNode;
-        }
+  // Look for half-checked nodes first - they are stopping points
+  const halfCheckedStoppingPoint = findHalfCheckedStoppingPoint(filePath, treeNodes, includedPaths);
+  if (halfCheckedStoppingPoint) {
+    displayLevel = halfCheckedStoppingPoint;
+    console.log('🛑 Half-checked stopping point found:', displayLevel);
+  } else {
+    // No half-checked stopping point, use expanded folder logic
+    const expandedParent = findDeepestExpandedParent(filePath, expandedFolders, includedPaths);
+    if (expandedParent) {
+      displayLevel = findAppropriateDisplayLevel(filePath, expandedParent, expandedFolders);
+      console.log('📂 Expanded parent logic, display level:', displayLevel);
+    } else {
+      // Look for any included ancestor
+      const includedAncestor = findDeepestIncludedAncestor(filePath, treeNodes, includedPaths);
+      if (includedAncestor) {
+        displayLevel = includedAncestor;
+        console.log('📁 Included ancestor found:', displayLevel);
       }
     }
   }
 
-  if (bestMatchingTreeNode) {
-    const treeNodeId = bestMatchingTreeNode.id;
-    console.log('📍 Best matching tree node:', treeNodeId, 'for file:', filePath);
+  if (displayLevel) {
+    leafNodeId = displayLevel;
+    const treeNode = treeNodes.get(displayLevel);
+    if (treeNode) {
+      const levelParts = displayLevel.split('/');
+      const levelLabel = levelParts[levelParts.length - 1];
+      const parentContainer = levelParts.length > 1 ? levelParts.slice(0, -1).join('/') : null;
 
-    if (bestMatchingTreeNode.type === 'file') {
-      // Direct file match
-      leafNodeId = treeNodeId;
-      createGraphNode(treeNodeId, bestMatchingTreeNode.label, 'file', null, true, nodes);
-    } else {
-      // Folder match - check if it's expanded or collapsed
-      if (collapsedFolders.has(treeNodeId)) {
-        // Folder is collapsed - represent the whole folder as one node
-        leafNodeId = treeNodeId;
-        createGraphNode(treeNodeId, bestMatchingTreeNode.label, 'folder', null, true, nodes);
-      } else if (expandedFolders.has(treeNodeId)) {
-        // Folder is expanded - show the actual file
-        leafNodeId = filePath;
-        const fileName = pathParts[pathParts.length - 1];
-
-        // Find appropriate parent container
-        const parentId = findExpandedParentContainer(filePath, expandedFolders);
-        createGraphNode(filePath, fileName, 'file', parentId, true, nodes);
-      }
+      // Determine if this level represents a file or folder
+      const isFileLevel = displayLevel === filePath;
+      createGraphNode(displayLevel, levelLabel, isFileLevel ? 'file' : 'folder', parentContainer, true, nodes);
     }
   }
 
   console.log('🎯 Final leaf node ID:', leafNodeId);
   return leafNodeId;
+}
+
+/**
+ * Find half-checked node that should serve as a stopping point for this file path
+ * Half-checked nodes represent the appropriate display level and should not be expanded further
+ */
+function findHalfCheckedStoppingPoint(filePath: string, treeNodes: Map<string, TreeNode>, includedPaths: Set<string>): string | null {
+  const pathParts = filePath.split('/').filter(part => part.length > 0);
+
+  // Look for half-checked nodes that are ancestors of this file path
+  let deepestHalfChecked: string | null = null;
+
+  for (const [treeNodeId, treeNode] of treeNodes.entries()) {
+    if (treeNode.checkboxState === 'half-checked' && includedPaths.has(treeNodeId)) {
+      const treeNodeParts = treeNodeId.split('/').filter(part => part.length > 0);
+
+      // Check if this half-checked node is an ancestor of the file path
+      if (pathParts.length >= treeNodeParts.length) {
+        const isAncestor = treeNodeParts.every((part, index) => pathParts[index] === part);
+
+        if (isAncestor) {
+          // This is a valid half-checked ancestor, keep the deepest one
+          if (!deepestHalfChecked || treeNodeParts.length > deepestHalfChecked.split('/').length) {
+            deepestHalfChecked = treeNodeId;
+          }
+        }
+      }
+    }
+  }
+
+  return deepestHalfChecked;
+}
+
+/**
+ * Find the deepest expanded parent folder for this file path
+ */
+function findDeepestExpandedParent(filePath: string, expandedFolders: Set<string>, includedPaths: Set<string>): string | null {
+  const pathParts = filePath.split('/').filter(part => part.length > 0);
+
+  let deepestExpanded: string | null = null;
+
+  for (const expandedFolder of expandedFolders) {
+    if (includedPaths.has(expandedFolder)) {
+      const expandedParts = expandedFolder.split('/').filter(part => part.length > 0);
+
+      // Check if this expanded folder is an ancestor of the file path
+      if (pathParts.length >= expandedParts.length) {
+        const isAncestor = expandedParts.every((part, index) => pathParts[index] === part);
+
+        if (isAncestor) {
+          // This is a valid expanded ancestor, keep the deepest one
+          if (!deepestExpanded || expandedParts.length > deepestExpanded.split('/').length) {
+            deepestExpanded = expandedFolder;
+          }
+        }
+      }
+    }
+  }
+
+  return deepestExpanded;
+}
+
+/**
+ * Find the deepest included ancestor for this file path
+ */
+function findDeepestIncludedAncestor(filePath: string, treeNodes: Map<string, TreeNode>, includedPaths: Set<string>): string | null {
+  const pathParts = filePath.split('/').filter(part => part.length > 0);
+
+  let deepestIncluded: string | null = null;
+
+  for (const [treeNodeId, treeNode] of treeNodes.entries()) {
+    if (treeNodeId === 'project') continue; // Skip root
+
+    if (includedPaths.has(treeNodeId)) {
+      const treeNodeParts = treeNodeId.split('/').filter(part => part.length > 0);
+
+      // Check if this node is an ancestor of the file path
+      if (pathParts.length >= treeNodeParts.length) {
+        const isAncestor = treeNodeParts.every((part, index) => pathParts[index] === part);
+
+        if (isAncestor) {
+          // This is a valid included ancestor, keep the deepest one
+          if (!deepestIncluded || treeNodeParts.length > deepestIncluded.split('/').length) {
+            deepestIncluded = treeNodeId;
+          }
+        }
+      }
+    }
+  }
+
+  return deepestIncluded;
+}
+
+/**
+ * Find the appropriate level to display this file path based on expanded folders
+ * When lib is expanded, lib/data/services/api/file.dart should show as lib/data
+ */
+function findAppropriateDisplayLevel(filePath: string, expandedFolderId: string, expandedFolders: Set<string>): string {
+  const pathParts = filePath.split('/').filter(part => part.length > 0);
+  const expandedParts = expandedFolderId.split('/').filter(part => part.length > 0);
+
+  // The file should be displayed at the level immediately below the expanded folder
+  // E.g., if 'lib' is expanded, 'lib/data/services/api/file.dart' should show as 'lib/data'
+  const targetLevel = expandedParts.length + 1;
+
+  if (pathParts.length > targetLevel) {
+    // Show as a folder at the target level
+    return pathParts.slice(0, targetLevel).join('/');
+  } else {
+    // Show the actual file/folder
+    return filePath;
+  }
 }
 
 /**

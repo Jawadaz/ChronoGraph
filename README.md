@@ -10,11 +10,12 @@ React + TypeScript frontend for ChronoGraph dependency analysis tool.
 - **Tree Visualization (`src/components/TreeBasedCytoscapeGraph.tsx`)**: Interactive tree-based dependency graph
 
 ### Recent Fixes (Tree-Based View)
-Fixed critical issue where tree-based view showed system paths instead of clean project structure:
+Major fixes to tree-based dependency visualization system:
 
-1. **Simplified Path Filtering**: Reduced overly aggressive filtering in `isLikelyProjectPath()`
-2. **Intelligent Path Normalization**: Added system prefix stripping for paths like `tmp/chronograph/cache/project/...`
-3. **Comprehensive Testing**: Added unit tests covering real-world compass_app scenarios
+1. **Path Normalization & Root Detection**: Fixed system path issues and improved root detection
+2. **Tree State Propagation**: Corrected checkbox state propagation with proper semantics
+3. **Graph Node Optimization**: Half-checked nodes now act as stopping points for clean node counts
+4. **Comprehensive Testing**: Added unit tests covering real-world scenarios and edge cases
 
 ### Test Coverage
 ```bash

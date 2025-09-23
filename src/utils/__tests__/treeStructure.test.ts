@@ -361,5 +361,72 @@ describe('Tree Structure', () => {
 
       console.log('✅ Actual compass_app test passed - no system paths found');
     });
+
+    it('should handle system paths and normalize them to clean project paths', () => {
+      // Dependencies with system paths (like what Rust backend provides)
+      const systemPathDependencies: Dependency[] = [
+        {
+          source_file: '/tmp/chronograph/flutter-samples-cache/compass_app/app/lib/config/assets.dart',
+          target_file: '/tmp/chronograph/flutter-samples-cache/compass_app/app/lib/domain/models/activity/activity.dart',
+          relationship_type: 'import'
+        },
+        {
+          source_file: 'tmp/chronograph/flutter-samples-cache/compass_app/app/integration_test/app_local_data_test.dart',
+          target_file: 'tmp/chronograph/flutter-samples-cache/compass_app/app/lib/config/dependencies.dart',
+          relationship_type: 'import'
+        }
+      ];
+
+      const tree = buildProjectTreeFromLakos(systemPathDependencies);
+
+      // Should detect 'app' as root, not 'tmp'
+      expect(tree.rootId).toBe('app');
+
+      // Should have clean project structure
+      expect(tree.nodes.has('lib')).toBe(true);
+      expect(tree.nodes.has('integration_test')).toBe(true);
+      expect(tree.nodes.has('lib/config')).toBe(true);
+      expect(tree.nodes.has('lib/config/assets.dart')).toBe(true);
+
+      // Should NOT have system paths
+      expect(tree.nodes.has('tmp')).toBe(false);
+      expect(tree.nodes.has('chronograph')).toBe(false);
+
+      console.log('✅ Path normalization test passed - system paths converted to clean project paths');
+    });
+
+    it('should detect app as root for Flutter app structure', () => {
+      // Flutter app structure should be detected
+      const flutterDependencies: Dependency[] = [
+        {
+          source_file: '/lib/config/assets.dart',
+          target_file: '/lib/domain/models/user.dart',
+          relationship_type: 'import'
+        },
+        {
+          source_file: '/test/widget_test.dart',
+          target_file: '/lib/main.dart',
+          relationship_type: 'import'
+        },
+        {
+          source_file: '/integration_test/app_test.dart',
+          target_file: '/lib/config/assets.dart',
+          relationship_type: 'import'
+        }
+      ];
+
+      const tree = buildProjectTreeFromLakos(flutterDependencies);
+
+      // Should detect 'app' as root for Flutter structure
+      expect(tree.rootId).toBe('app');
+
+      // Should have Flutter app folders as direct children
+      const rootNode = tree.nodes.get('app');
+      expect(rootNode?.children).toContain('lib');
+      expect(rootNode?.children).toContain('test');
+      expect(rootNode?.children).toContain('integration_test');
+
+      console.log('✅ Flutter app root detection test passed');
+    });
   });
 });

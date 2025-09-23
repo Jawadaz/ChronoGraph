@@ -25,10 +25,10 @@ export interface ProjectTree {
 export function buildProjectTreeFromLakos(dependencies: Dependency[]): ProjectTree {
   const allPaths = new Set<string>();
 
-  // Collect all unique file paths
+  // Collect all unique file paths with normalization
   dependencies.forEach(dep => {
-    allPaths.add(dep.source_file);
-    allPaths.add(dep.target_file);
+    allPaths.add(normalizePath(dep.source_file));
+    allPaths.add(normalizePath(dep.target_file));
   });
 
   console.log('🔍 Raw paths before filtering:', {
@@ -52,6 +52,7 @@ export function buildProjectTreeFromLakos(dependencies: Dependency[]): ProjectTr
     commonRoot,
     samplePaths: pathArray.slice(0, 3)
   });
+
 
   const nodes = new Map<string, TreeNode>();
 
@@ -209,8 +210,8 @@ function isLikelyProjectPath(path: string, analysis: {
 }): boolean {
   // Only filter out very obvious system/build paths
   const obviousSystemPatterns = [
-    /^\/tmp\/chronograph\//,  // Our own temp cache paths (already handled by normalization)
-    /^tmp\/chronograph\//,    // Our own temp cache paths (already handled by normalization)
+    // /^\/tmp\/chronograph\//,  // Our own temp cache paths (already handled by normalization)
+    // /^tmp\/chronograph\//,    // Our own temp cache paths (already handled by normalization)
     /^\/var\/tmp\//,
     /^\/var\/log\//,
     /^\/proc\//,
@@ -281,11 +282,20 @@ function findCommonRoot(paths: string[]): string {
   if (pathAnalysis.topLevelDirs.size > 0) {
     const topDirs = Array.from(pathAnalysis.topLevelDirs);
 
-    // If we have multiple top-level directories, we need a common root
+    // If we have multiple top-level directories that look like a Flutter/Dart app structure
     if (topDirs.length > 1) {
-      // Try to infer project name from paths or use generic name
-      console.log('🔍 Multiple top-level dirs detected:', topDirs, '- creating synthetic root');
-      return 'project';
+      const appLikeDirs = ['lib', 'test', 'integration_test', 'testing'];
+      const hasAppStructure = appLikeDirs.some(dir => topDirs.includes(dir));
+
+      if (hasAppStructure) {
+        // This looks like an app structure - use 'app' as root since user specified compass_app/app
+        console.log('🔍 App structure detected with dirs:', topDirs, '- using app as root');
+        return 'app';
+      } else {
+        // Unknown structure - use generic root
+        console.log('🔍 Multiple top-level dirs detected:', topDirs, '- creating synthetic root');
+        return 'project';
+      }
     } else if (topDirs.length === 1) {
       // Only one top-level directory, use it as root
       console.log('🔍 Single top-level directory as root:', topDirs[0]);
@@ -420,17 +430,68 @@ export function updateCheckboxState(
   // Update current node
   node.checkboxState = newState;
 
-  // Propagate down to children
+  // Propagate down to children (all states now propagate correctly)
   propagateDownward(nodeId, newState, updatedNodes);
 
-  // Propagate up to parents (without affecting the children we just set)
+  // Propagate up to parents (recalculate parent states based on all children)
   propagateUpward(nodeId, updatedNodes);
 
   return updatedNodes;
 }
 
 /**
- * Propagate checkbox state down to all children - CORRECT BEHAVIOR
+ * Create a realistic half-checked scenario for testing
+ * This simulates the user's desired state where a parent is half-checked (contracted)
+ * and all its children are unchecked (not visible)
+ */
+export function createHalfCheckedScenario(
+  nodes: Map<string, TreeNode>,
+  parentId: string
+): Map<string, TreeNode> {
+  const updatedNodes = new Map(nodes);
+
+  // Set the parent to half-checked (contracted view)
+  // This will automatically make all children unchecked
+  const result = updateCheckboxState(parentId, 'half-checked', updatedNodes);
+  result.forEach((node, id) => updatedNodes.set(id, node));
+
+  return updatedNodes;
+}
+
+/**
+ * Normalize file path by stripping system prefixes
+ */
+function normalizePath(path: string): string {
+  let normalized = path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/|\/$/, '');
+
+  // Strip system/temp path prefixes to get project-relative paths
+  // This handles paths like: tmp/chronograph/flutter-samples-cache/compass_app/app/lib/...
+  // And converts them to: lib/...
+  const systemPrefixPatterns = [
+    /^tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//,  // tmp/chronograph/cache/repo/subfolder/
+    /^\/tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//, // /tmp/chronograph/cache/repo/subfolder/
+    /^[A-Z]:\/tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//, // Windows temp paths
+  ];
+
+  for (const pattern of systemPrefixPatterns) {
+    if (pattern.test(normalized)) {
+      const before = normalized;
+      normalized = normalized.replace(pattern, '');
+      console.log('🔧 Stripped system prefix from path:', before, '->', normalized);
+      break;
+    }
+  }
+
+  return normalized;
+}
+
+/**
+ * Propagate checkbox state down to all children
+ *
+ * Checkbox state semantics:
+ * - checked: Node is expanded and visible, all children are also checked/expanded
+ * - unchecked: Node is not visible at all
+ * - half-checked: Node is visible as a contracted/collapsed node, all children are unchecked
  */
 function propagateDownward(nodeId: string, state: CheckboxState, nodes: Map<string, TreeNode>): void {
   const node = nodes.get(nodeId);
@@ -441,25 +502,22 @@ function propagateDownward(nodeId: string, state: CheckboxState, nodes: Map<stri
     if (!childNode) return;
 
     if (state === 'checked') {
-      // When parent becomes checked:
-      // - Folder children become half-checked
-      // - File children become checked
+      // When parent becomes checked: folder children become half-checked (visible but contracted)
+      // file children become checked
       if (childNode.type === 'folder') {
         childNode.checkboxState = 'half-checked';
-        // For half-checked folders, recursively make their children checked (but files under them stay checked)
-        propagateDownward(childId, 'checked', nodes);
+        // Half-checked folders have unchecked children (contracted view)
+        propagateDownward(childId, 'half-checked', nodes);
       } else {
         childNode.checkboxState = 'checked';
       }
     } else if (state === 'unchecked') {
       // When parent becomes unchecked: ALL children become unchecked
       childNode.checkboxState = 'unchecked';
-      // Recursively propagate unchecked
       propagateDownward(childId, 'unchecked', nodes);
     } else if (state === 'half-checked') {
-      // When parent becomes half-checked: ALL children become unchecked
+      // When parent becomes half-checked: ALL children become unchecked (contracted view)
       childNode.checkboxState = 'unchecked';
-      // Recursively propagate unchecked
       propagateDownward(childId, 'unchecked', nodes);
     }
   });
@@ -467,6 +525,11 @@ function propagateDownward(nodeId: string, state: CheckboxState, nodes: Map<stri
 
 /**
  * Propagate checkbox state changes up to parent nodes - ONLY UPWARD
+ *
+ * Parent state calculation based on new semantics:
+ * - checked: All children are checked (fully expanded)
+ * - unchecked: All children are unchecked (not visible)
+ * - half-checked: Mixed children states OR parent wants to be shown as contracted
  */
 function propagateUpward(nodeId: string, nodes: Map<string, TreeNode>): void {
   const node = nodes.get(nodeId);
@@ -482,17 +545,29 @@ function propagateUpward(nodeId: string, nodes: Map<string, TreeNode>): void {
   });
 
   const checkedCount = childStates.filter(state => state === 'checked').length;
+  const halfCheckedCount = childStates.filter(state => state === 'half-checked').length;
+  const uncheckedCount = childStates.filter(state => state === 'unchecked').length;
   const totalCount = childStates.length;
-  const hasHalfChecked = childStates.some(state => state === 'half-checked');
 
   // Determine parent state based on children
   let newParentState: CheckboxState;
+
   if (checkedCount === totalCount) {
+    // All children are checked -> parent is checked (fully expanded)
     newParentState = 'checked';
-  } else if (checkedCount === 0 && !hasHalfChecked) {
+  } else if (uncheckedCount === totalCount) {
+    // All children are unchecked -> parent is unchecked (not visible)
     newParentState = 'unchecked';
   } else {
-    newParentState = 'half-checked';
+    // Mixed states or has half-checked children
+    // IMPORTANT: Don't automatically change parent from checked to half-checked
+    // If parent is already checked, keep it checked (user wants to see the mixed children)
+    // Only make parent half-checked if it wasn't already checked
+    if (parentNode.checkboxState === 'checked') {
+      newParentState = 'checked'; // Keep parent checked to show mixed children
+    } else {
+      newParentState = 'half-checked'; // Parent becomes half-checked only if not already checked
+    }
   }
 
   // Update parent if it changed and continue upward
