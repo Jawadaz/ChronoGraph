@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { DependencyGraph } from './DependencyGraph';
 import { CytoscapeGraph } from './CytoscapeGraph';
+import { TreeView, treeViewStyles } from './TreeView';
+import { TreeBasedCytoscapeGraph } from './TreeBasedCytoscapeGraph';
+import { buildProjectTreeFromLakos, updateCheckboxState, CheckboxState, TreeNode } from '../utils/treeStructure';
+import { transformToTreeBasedGraphElements } from '../utils/treeBasedGraphTransforms';
 
 interface Dependency {
   source_file: string;
@@ -63,7 +67,11 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
   // Graph view state
   const [levelOfDetail, setLevelOfDetail] = React.useState<'file' | 'folder'>('file');
   const [selectedGraphNode, setSelectedGraphNode] = React.useState<string | null>(null);
-  const [graphType, setGraphType] = useState<'d3' | 'cytoscape'>('cytoscape');
+  const [graphType, setGraphType] = useState<'d3' | 'cytoscape' | 'tree-based'>('tree-based');
+
+  // Tree-based graph state
+  const [treeNodes, setTreeNodes] = useState<Map<string, TreeNode>>(new Map());
+  const [treeRootId, setTreeRootId] = useState<string>('');
 
   if (snapshots.length === 0) {
     return (
@@ -88,6 +96,40 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
   const handleEdgeDoubleClick = (sourceId: string, targetId: string, relationshipTypes: string[]) => {
     setEdgeFilter({ sourceId, targetId, relationshipTypes });
     setViewMode('dependencies');
+  };
+
+  // Build tree when commit changes or graph type changes to tree-based
+  React.useEffect(() => {
+    console.log('🔍 Tree useEffect triggered:', {
+      hasSelectedCommit: !!selectedCommit,
+      graphType,
+      dependenciesCount: selectedCommit?.analysis_result.dependencies.length || 0
+    });
+
+    if (selectedCommit && graphType === 'tree-based') {
+      console.log('🌲 Building tree for real compass_app data...');
+      const projectTree = buildProjectTreeFromLakos(selectedCommit.analysis_result.dependencies);
+      setTreeNodes(projectTree.nodes);
+      setTreeRootId(projectTree.rootId);
+
+      console.log('🌳 Built project tree:', {
+        rootId: projectTree.rootId,
+        totalNodes: projectTree.nodes.size,
+        sampleNodes: Array.from(projectTree.nodes.keys()).slice(0, 5)
+      });
+    }
+  }, [selectedCommit, graphType]);
+
+  // Handle tree checkbox changes
+  const handleTreeCheckboxChange = (nodeId: string, newState: CheckboxState) => {
+    const updatedNodes = updateCheckboxState(nodeId, newState, treeNodes);
+    setTreeNodes(updatedNodes);
+
+    console.log('🔄 Tree checkbox changed:', {
+      nodeId,
+      newState,
+      updatedNodesCount: updatedNodes.size
+    });
   };
 
   // Helper functions for dependency management
@@ -431,15 +473,18 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
               <label>📊 Graph Engine:</label>
               <select
                 value={graphType}
-                onChange={(e) => setGraphType(e.target.value as 'd3' | 'cytoscape')}
+                onChange={(e) => setGraphType(e.target.value as 'd3' | 'cytoscape' | 'tree-based')}
                 className="graph-type-select"
               >
+                <option value="tree-based">🌳 Tree-Based Control (New)</option>
                 <option value="cytoscape">🆕 Cytoscape.js (Hierarchical)</option>
                 <option value="d3">🔧 D3.js (Current)</option>
               </select>
             </div>
             <div className="graph-description">
-              {graphType === 'cytoscape' ?
+              {graphType === 'tree-based' ?
+                '🌳 Tree-controlled visualization with three-state checkboxes for precise filtering' :
+                graphType === 'cytoscape' ?
                 '✨ New hierarchical layout with expandable folders and compound nodes' :
                 '🔧 Current force-directed layout for comparison'
               }
@@ -447,7 +492,31 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           </div>
 
           {/* Conditional Graph Rendering */}
-          {graphType === 'cytoscape' ? (
+          {graphType === 'tree-based' ? (
+            <div className="tree-based-graph-container">
+              <div className="tree-sidebar">
+                {treeNodes.size > 0 && treeRootId ? (
+                  <TreeView
+                    nodes={treeNodes}
+                    rootId={treeRootId}
+                    onCheckboxChange={handleTreeCheckboxChange}
+                  />
+                ) : (
+                  <div className="tree-loading">
+                    🌳 Building project tree...
+                  </div>
+                )}
+              </div>
+              <div className="graph-main">
+                <TreeBasedCytoscapeGraph
+                  dependencies={selectedCommit.analysis_result.dependencies}
+                  treeNodes={treeNodes}
+                  onNodeSelect={setSelectedGraphNode}
+                  onEdgeDoubleClick={handleEdgeDoubleClick}
+                />
+              </div>
+            </div>
+          ) : graphType === 'cytoscape' ? (
             <CytoscapeGraph
               dependencies={selectedCommit.analysis_result.dependencies}
               levelOfDetail={levelOfDetail}
@@ -924,7 +993,76 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           background: #dc2626;
           transform: scale(1.1);
         }
+
+        /* Tree-based graph layout */
+        .tree-based-graph-container {
+          display: flex;
+          gap: 20px;
+          margin-top: 20px;
+          height: 650px;
+        }
+
+        .tree-sidebar {
+          width: 350px;
+          flex-shrink: 0;
+          height: 100%;
+          overflow: hidden;
+        }
+
+        .tree-loading {
+          padding: 40px 20px;
+          text-align: center;
+          color: #6b7280;
+          font-size: 14px;
+          background: #f9fafb;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+        }
+
+        .graph-main {
+          flex: 1;
+          height: 100%;
+          min-width: 0;
+        }
+
+        .tree-based-cytoscape-container {
+          width: 100%;
+          height: 100%;
+          position: relative;
+        }
+
+        .graph-loading {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: rgba(255, 255, 255, 0.9);
+          padding: 20px;
+          border-radius: 8px;
+          border: 1px solid #e5e7eb;
+          color: #6b7280;
+          font-size: 14px;
+          z-index: 1000;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 1200px) {
+          .tree-based-graph-container {
+            flex-direction: column;
+            height: auto;
+          }
+
+          .tree-sidebar {
+            width: 100%;
+            height: 400px;
+          }
+
+          .graph-main {
+            height: 500px;
+          }
+        }
       `}</style>
+      <style jsx>{treeViewStyles}</style>
     </div>
   );
 };
