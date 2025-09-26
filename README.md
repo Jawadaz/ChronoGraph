@@ -9,13 +9,14 @@ React + TypeScript frontend for ChronoGraph dependency analysis tool.
 - **Tree Transforms (`src/utils/treeBasedGraphTransforms.ts`)**: Converts dependency data to Cytoscape graph elements
 - **Tree Visualization (`src/components/TreeBasedCytoscapeGraph.tsx`)**: Interactive tree-based dependency graph
 
-### Recent Fixes (Tree-Based View)
-Major fixes to tree-based dependency visualization system:
+### Latest Features (Advanced UI & Controls)
+Major improvements to graph visualization and user interface:
 
-1. **Path Normalization & Root Detection**: Fixed system path issues and improved root detection
-2. **Tree State Propagation**: Corrected checkbox state propagation with proper semantics
-3. **Graph Node Optimization**: Half-checked nodes now act as stopping points for clean node counts
-4. **Comprehensive Testing**: Added unit tests covering real-world scenarios and edge cases
+1. **Advanced Graph Settings**: Complete settings panel redesign with right-side positioning, collapsible interface, and compact layout
+2. **Comprehensive Layout Controls**: Full Dagre layout parameter control including orientation, alignment, algorithm selection, margins, and animations
+3. **Dynamic Weight Mapping**: Intelligent arrow thickness scaling that adapts to current graph weight range for optimal visual distinction
+4. **Professional UI Design**: Space-efficient horizontal controls, proper scrollbars, and responsive layout
+5. **Tree-Based View Foundation**: Robust path normalization, state propagation, and node optimization for future enhancements
 
 ### Test Coverage
 ```bash

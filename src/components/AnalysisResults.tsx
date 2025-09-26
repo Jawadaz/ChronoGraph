@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { DependencyGraph } from './DependencyGraph';
-import { CytoscapeGraph } from './CytoscapeGraph';
+// Removed DependencyGraph and CytoscapeGraph - keeping only tree-based visualization
 import { TreeView, treeViewStyles } from './TreeView';
 import { TreeBasedCytoscapeGraph } from './TreeBasedCytoscapeGraph';
 import { buildProjectTreeFromLakos, updateCheckboxState, CheckboxState, TreeNode } from '../utils/treeStructure';
@@ -64,14 +63,13 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
     relationshipTypes: string[];
   } | null>(null);
 
-  // Graph view state
-  const [levelOfDetail, setLevelOfDetail] = React.useState<'file' | 'folder'>('file');
+  // Graph view state (simplified to only tree-based)
   const [selectedGraphNode, setSelectedGraphNode] = React.useState<string | null>(null);
-  const [graphType, setGraphType] = useState<'d3' | 'cytoscape' | 'tree-based'>('tree-based');
 
   // Tree-based graph state
   const [treeNodes, setTreeNodes] = useState<Map<string, TreeNode>>(new Map());
   const [treeRootId, setTreeRootId] = useState<string>('');
+  const [isTreePanelCollapsed, setIsTreePanelCollapsed] = useState(false);
 
   if (snapshots.length === 0) {
     return (
@@ -98,16 +96,15 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
     setViewMode('dependencies');
   };
 
-  // Build tree when commit changes or graph type changes to tree-based
+  // Build tree when commit changes
   React.useEffect(() => {
     console.log('🔍 Tree useEffect triggered:', {
       hasSelectedCommit: !!selectedCommit,
-      graphType,
       dependenciesCount: selectedCommit?.analysis_result.dependencies.length || 0
     });
 
-    if (selectedCommit && graphType === 'tree-based') {
-      console.log('🌲 Building tree for real compass_app data...');
+    if (selectedCommit) {
+      console.log('🌲 Building tree for data...');
       const projectTree = buildProjectTreeFromLakos(selectedCommit.analysis_result.dependencies);
       setTreeNodes(projectTree.nodes);
       setTreeRootId(projectTree.rootId);
@@ -118,7 +115,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
         sampleNodes: Array.from(projectTree.nodes.keys()).slice(0, 5)
       });
     }
-  }, [selectedCommit, graphType]);
+  }, [selectedCommit]);
 
   // Handle tree checkbox changes
   const handleTreeCheckboxChange = (nodeId: string, newState: CheckboxState) => {
@@ -447,18 +444,6 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
             <h3>📊 Dependency Graph for Commit {selectedCommit.commit_info.hash.substring(0, 8)}</h3>
 
             <div className="graph-controls">
-              <div className="control-group">
-                <label>Level of Detail:</label>
-                <select
-                  value={levelOfDetail}
-                  onChange={(e) => setLevelOfDetail(e.target.value as 'file' | 'folder')}
-                  className="lod-select"
-                >
-                  <option value="file">📄 Files</option>
-                  <option value="folder">📁 Folders</option>
-                </select>
-              </div>
-
               {selectedGraphNode && (
                 <div className="selected-node-info">
                   <strong>Selected:</strong> {selectedGraphNode.split('/').pop()}
@@ -467,78 +452,62 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
             </div>
           </div>
 
-          {/* Graph Type Selector */}
-          <div className="graph-type-selector">
-            <div className="selector-group">
-              <label>📊 Graph Engine:</label>
-              <select
-                value={graphType}
-                onChange={(e) => setGraphType(e.target.value as 'd3' | 'cytoscape' | 'tree-based')}
-                className="graph-type-select"
-              >
-                <option value="tree-based">🌳 Tree-Based Control (New)</option>
-                <option value="cytoscape">🆕 Cytoscape.js (Hierarchical)</option>
-                <option value="d3">🔧 D3.js (Current)</option>
-              </select>
-            </div>
-            <div className="graph-description">
-              {graphType === 'tree-based' ?
-                '🌳 Tree-controlled visualization with three-state checkboxes for precise filtering' :
-                graphType === 'cytoscape' ?
-                '✨ New hierarchical layout with expandable folders and compound nodes' :
-                '🔧 Current force-directed layout for comparison'
-              }
-            </div>
-          </div>
-
-          {/* Conditional Graph Rendering */}
-          {graphType === 'tree-based' ? (
-            <div className="tree-based-graph-container">
+          {/* Tree-Based Graph - Full Width with Collapsible Tree */}
+          <div className={`tree-based-graph-container ${isTreePanelCollapsed ? 'tree-collapsed' : ''}`}>
+            {!isTreePanelCollapsed && (
               <div className="tree-sidebar">
+                <div className="tree-sidebar-header">
+                  <h4>🌳 Project Structure</h4>
+                  <button
+                    onClick={() => setIsTreePanelCollapsed(true)}
+                    className="collapse-button"
+                    title="Hide tree panel"
+                  >
+                    ◄
+                  </button>
+                </div>
                 {treeNodes.size > 0 && treeRootId ? (
-                  <TreeView
-                    nodes={treeNodes}
-                    rootId={treeRootId}
-                    onCheckboxChange={handleTreeCheckboxChange}
-                  />
+                  <div className="tree-content">
+                    <TreeView
+                      nodes={treeNodes}
+                      rootId={treeRootId}
+                      onCheckboxChange={handleTreeCheckboxChange}
+                    />
+                  </div>
                 ) : (
                   <div className="tree-loading">
                     🌳 Building project tree...
                   </div>
                 )}
               </div>
-              <div className="graph-main">
-                <TreeBasedCytoscapeGraph
-                  dependencies={selectedCommit.analysis_result.dependencies}
-                  treeNodes={treeNodes}
-                  onNodeSelect={setSelectedGraphNode}
-                  onEdgeDoubleClick={handleEdgeDoubleClick}
-                />
-              </div>
+            )}
+
+            <div className="graph-main">
+              {isTreePanelCollapsed && (
+                <button
+                  onClick={() => setIsTreePanelCollapsed(false)}
+                  className="expand-tree-button"
+                  title="Show tree panel"
+                >
+                  ► Tree
+                </button>
+              )}
+              <TreeBasedCytoscapeGraph
+                dependencies={selectedCommit.analysis_result.dependencies}
+                treeNodes={treeNodes}
+                onNodeSelect={setSelectedGraphNode}
+                onEdgeDoubleClick={handleEdgeDoubleClick}
+              />
             </div>
-          ) : graphType === 'cytoscape' ? (
-            <CytoscapeGraph
-              dependencies={selectedCommit.analysis_result.dependencies}
-              levelOfDetail={levelOfDetail}
-              onNodeSelect={setSelectedGraphNode}
-              onEdgeDoubleClick={handleEdgeDoubleClick}
-              viewRootFolder="/"
-              folderLevel={1}
-            />
-          ) : (
-            <DependencyGraph
-              dependencies={selectedCommit.analysis_result.dependencies}
-              levelOfDetail={levelOfDetail}
-              onNodeSelect={setSelectedGraphNode}
-              onEdgeDoubleClick={handleEdgeDoubleClick}
-            />
-          )}
+          </div>
         </div>
       )}
 
       <style jsx>{`
         .analysis-results {
           margin-top: 30px;
+          /* Allow child elements to break out for full width */
+          overflow: visible;
         }
 
         .results-header {
@@ -994,12 +963,18 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           transform: scale(1.1);
         }
 
-        /* Tree-based graph layout */
+        /* Tree-based graph layout - Full width */
         .tree-based-graph-container {
           display: flex;
           gap: 20px;
           margin-top: 20px;
-          height: 650px;
+          height: calc(100vh - 200px); /* Use most of viewport height */
+          /* Break out of parent container for full width */
+          margin-left: -20px;
+          margin-right: -20px;
+          padding: 0 20px;
+          background: #fafbfc;
+          border-top: 1px solid #e2e8f0;
         }
 
         .tree-sidebar {
@@ -1007,6 +982,58 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           flex-shrink: 0;
           height: 100%;
           overflow: hidden;
+          background: white;
+          border-right: 1px solid #e2e8f0;
+          display: flex;
+          flex-direction: column;
+          transition: all 0.3s ease;
+        }
+
+        .tree-based-graph-container.tree-collapsed .tree-sidebar {
+          width: 0;
+          opacity: 0;
+        }
+
+        .tree-sidebar-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          background: #f8fafc;
+          border-bottom: 1px solid #e2e8f0;
+          flex-shrink: 0;
+        }
+
+        .tree-sidebar-header h4 {
+          margin: 0;
+          font-size: 14px;
+          color: #374151;
+          font-weight: 600;
+        }
+
+        .collapse-button {
+          background: #ef4444;
+          color: white;
+          border: none;
+          width: 24px;
+          height: 24px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s;
+        }
+
+        .collapse-button:hover {
+          background: #dc2626;
+          transform: scale(1.1);
+        }
+
+        .tree-content {
+          flex: 1;
+          overflow: auto;
         }
 
         .tree-loading {
@@ -1023,6 +1050,34 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           flex: 1;
           height: 100%;
           min-width: 0;
+          position: relative;
+          background: white;
+        }
+
+        .expand-tree-button {
+          position: absolute;
+          top: 16px;
+          left: 16px;
+          background: #3b82f6;
+          color: white;
+          border: none;
+          padding: 8px 12px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 500;
+          z-index: 100;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          transition: all 0.2s;
+          box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+
+        .expand-tree-button:hover {
+          background: #2563eb;
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
         }
 
         .tree-based-cytoscape-container {
@@ -1050,15 +1105,38 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
           .tree-based-graph-container {
             flex-direction: column;
             height: auto;
+            margin-left: -10px;
+            margin-right: -10px;
+            padding: 0 10px;
           }
 
           .tree-sidebar {
             width: 100%;
-            height: 400px;
+            height: 300px;
+          }
+
+          .tree-based-graph-container.tree-collapsed .tree-sidebar {
+            height: 0;
           }
 
           .graph-main {
             height: 500px;
+          }
+
+          .expand-tree-button {
+            top: 8px;
+            left: 8px;
+            padding: 6px 10px;
+            font-size: 11px;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .tree-based-graph-container {
+            margin-left: -10px;
+            margin-right: -10px;
+            padding: 0 10px;
+            height: calc(100vh - 250px);
           }
         }
       `}</style>
