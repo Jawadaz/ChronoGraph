@@ -4,6 +4,15 @@ import { invoke } from '@tauri-apps/api/core';
 // Check if we're in a Tauri environment
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 
+interface CachedRepository {
+  name: string;
+  url: string;
+  local_path: string;
+  last_updated: number;
+  size_mb: number;
+  commit_count: number;
+}
+
 interface RepositoryInputProps {
   onAnalysisStart: (repoUrl: string, subfolder?: string) => void;
   isAnalyzing: boolean;
@@ -14,10 +23,24 @@ export const RepositoryInput: React.FC<RepositoryInputProps> = ({ onAnalysisStar
   const [subfolder, setSubfolder] = useState('');
   const [lakosAvailable, setLakosAvailable] = useState<boolean | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [cachedRepos, setCachedRepos] = useState<CachedRepository[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
 
   React.useEffect(() => {
     checkLakosAvailability();
+    loadCachedRepositories();
   }, []);
+
+  const loadCachedRepositories = async () => {
+    if (!isTauri) return;
+
+    try {
+      const repos = await invoke('get_cached_repositories');
+      setCachedRepos(repos as CachedRepository[]);
+    } catch (error) {
+      console.error('Failed to load cached repositories:', error);
+    }
+  };
 
   const checkLakosAvailability = async () => {
     if (!isTauri) {
@@ -114,15 +137,37 @@ export const RepositoryInput: React.FC<RepositoryInputProps> = ({ onAnalysisStar
 
       <form onSubmit={handleSubmit} className="repo-form">
         <div className="input-group">
-          <input
-            type="url"
-            value={repoUrl}
-            onChange={(e) => setRepoUrl(e.target.value)}
-            placeholder="https://github.com/owner/repo"
-            className="repo-input"
-            disabled={isAnalyzing}
-            required
-          />
+          <div className="repo-input-container">
+            <input
+              type="url"
+              value={repoUrl}
+              onChange={(e) => setRepoUrl(e.target.value)}
+              onFocus={() => setShowDropdown(cachedRepos.length > 0)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+              placeholder="https://github.com/owner/repo"
+              className="repo-input"
+              disabled={isAnalyzing}
+              required
+            />
+            {showDropdown && cachedRepos.length > 0 && (
+              <div className="repo-dropdown">
+                <div className="dropdown-header">📂 Recently Cached Repositories</div>
+                {cachedRepos.map((repo) => (
+                  <div
+                    key={repo.name}
+                    className="dropdown-item"
+                    onClick={() => {
+                      setRepoUrl(repo.url);
+                      setShowDropdown(false);
+                    }}
+                  >
+                    <div className="repo-dropdown-name">{repo.name}</div>
+                    <div className="repo-dropdown-url">{repo.url}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <button 
             type="submit" 
             disabled={isAnalyzing || !lakosAvailable}
@@ -260,6 +305,11 @@ export const RepositoryInput: React.FC<RepositoryInputProps> = ({ onAnalysisStar
           margin-bottom: 20px;
         }
 
+        .repo-input-container {
+          position: relative;
+          flex: 1;
+        }
+
         .subfolder-group {
           margin-bottom: 20px;
         }
@@ -304,7 +354,7 @@ export const RepositoryInput: React.FC<RepositoryInputProps> = ({ onAnalysisStar
         }
 
         .repo-input {
-          flex: 1;
+          width: 100%;
           padding: 12px;
           border: 2px solid #ddd;
           border-radius: 8px;
@@ -314,6 +364,59 @@ export const RepositoryInput: React.FC<RepositoryInputProps> = ({ onAnalysisStar
         .repo-input:focus {
           outline: none;
           border-color: #2563eb;
+        }
+
+        .repo-dropdown {
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          background: white;
+          border: 2px solid #2563eb;
+          border-radius: 8px;
+          border-top-left-radius: 0;
+          border-top-right-radius: 0;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          z-index: 1000;
+          max-height: 300px;
+          overflow-y: auto;
+        }
+
+        .dropdown-header {
+          padding: 8px 12px;
+          background: #f3f4f6;
+          border-bottom: 1px solid #e5e7eb;
+          font-size: 12px;
+          font-weight: 600;
+          color: #374151;
+        }
+
+        .dropdown-item {
+          padding: 10px 12px;
+          border-bottom: 1px solid #f3f4f6;
+          cursor: pointer;
+          transition: background-color 0.2s;
+        }
+
+        .dropdown-item:hover {
+          background: #f8fafc;
+        }
+
+        .dropdown-item:last-child {
+          border-bottom: none;
+        }
+
+        .repo-dropdown-name {
+          font-weight: 600;
+          font-size: 14px;
+          color: #374151;
+          margin-bottom: 2px;
+        }
+
+        .repo-dropdown-url {
+          font-size: 12px;
+          color: #6b7280;
+          word-break: break-all;
         }
 
         .analyze-button {

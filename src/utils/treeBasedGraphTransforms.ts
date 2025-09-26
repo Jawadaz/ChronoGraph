@@ -15,26 +15,77 @@ export function transformToTreeBasedGraphElements(
   // Get filtering info from tree
   const { includedPaths, expandedFolders, collapsedFolders } = getTreeFilteringInfo(treeNodes);
 
-  console.log('🌳 Tree-based filtering:', {
-    totalTreeNodes: treeNodes.size,
-    includedPaths: includedPaths.size,
-    expandedFolders: expandedFolders.size,
-    collapsedFolders: collapsedFolders.size,
-    sampleIncludedPaths: Array.from(includedPaths).slice(0, 5),
-    sampleExpandedFolders: Array.from(expandedFolders).slice(0, 5),
-    sampleCollapsedFolders: Array.from(collapsedFolders).slice(0, 5),
-    sampleDependencyPaths: dependencies.slice(0, 3).map(d => ({source: d.source_file, target: d.target_file})),
-    allTreeNodeIds: Array.from(treeNodes.keys()).slice(0, 10),
-    sampleTreeNodes: Array.from(treeNodes.entries()).slice(0, 3).map(([id, node]) => ({id, label: node.label, type: node.type}))
+  // Find root node (has no parent) - exclude only artificial roots like 'app'
+  const rootNode = Array.from(treeNodes.values()).find(node => !node.parent);
+  const rootId = rootNode?.id;
+
+  // Only exclude artificial root nodes, not real project folders
+  const shouldExcludeRoot = rootId === 'app' || rootId === 'project' || rootId === 'src';
+
+  // DEBUG: Check for config node issues only
+  const configNodeState = treeNodes.get('lib/config');
+  const configInIncluded = includedPaths.has('lib/config');
+
+  if (configNodeState || configInIncluded) {
+    console.log('🚨 CONFIG DEBUG:', {
+      configState: configNodeState?.checkboxState || 'not found',
+      configIncluded: configInIncluded,
+      totalIncluded: includedPaths.size
+    });
+  }
+
+
+  console.log('📊 Processing dependencies:', {
+    totalDependencies: dependencies.length,
+    totalIncludedPaths: includedPaths.size,
+    sampleIncludedPaths: Array.from(includedPaths).slice(0, 10)
   });
 
+  let processedCount = 0;
+  let skippedCount = 0;
 
   // Process each dependency
   dependencies.forEach((dep, index) => {
     const sourcePath = normalizePath(dep.source_file);
     const targetPath = normalizePath(dep.target_file);
 
-    // Create nodes for source and target based on tree state
+    // Debug first few dependencies
+    if (index < 2) {
+      console.log(`🔍 Sample dependency [${index}]:`, {
+        originalSource: dep.source_file,
+        normalizedSource: sourcePath,
+        originalTarget: dep.target_file,
+        normalizedTarget: targetPath
+      });
+    }
+
+    // Only process dependencies where both source and target should be visible
+    // Check if the source and target paths map to included tree nodes
+    const sourceDisplayLevel = determineDisplayLevel(sourcePath, treeNodes, includedPaths, expandedFolders, collapsedFolders);
+    const targetDisplayLevel = determineDisplayLevel(targetPath, treeNodes, includedPaths, expandedFolders, collapsedFolders);
+
+    if (index < 2) {
+      console.log(`  → Display levels: source='${sourceDisplayLevel}', target='${targetDisplayLevel}'`);
+      console.log(`  → Included checks: source=${sourceDisplayLevel ? includedPaths.has(sourceDisplayLevel) : false}, target=${targetDisplayLevel ? includedPaths.has(targetDisplayLevel) : false}`);
+    }
+
+    // Skip this dependency if either endpoint is not included in the tree view
+    if (!sourceDisplayLevel || !targetDisplayLevel || !includedPaths.has(sourceDisplayLevel) || !includedPaths.has(targetDisplayLevel)) {
+      skippedCount++;
+      // Only log first few skips to avoid spam
+      if (index < 2) {
+        console.log('🚫 Skipping dependency:', {
+          source: sourcePath,
+          target: targetPath,
+          reason: !sourceDisplayLevel ? 'no source level' :
+                  !targetDisplayLevel ? 'no target level' :
+                  !includedPaths.has(sourceDisplayLevel) ? 'source not included' : 'target not included'
+        });
+      }
+      return;
+    }
+
+    // Create nodes for source and target (we know they're both included now)
     const sourceLeafId = createTreeBasedNode(sourcePath, treeNodes, includedPaths, expandedFolders, collapsedFolders, nodes);
     const targetLeafId = createTreeBasedNode(targetPath, treeNodes, includedPaths, expandedFolders, collapsedFolders, nodes);
 
@@ -58,11 +109,24 @@ export function transformToTreeBasedGraphElements(
           originalDependencies: [dep]
         });
       }
+    } else {
+      processedCount++;
     }
   });
 
-  // Create compound parent containers for expanded folders
-  createCompoundContainers(treeNodes, expandedFolders, nodes);
+  console.log('📊 Dependency processing summary:', {
+    totalDependencies: dependencies.length,
+    processedCount,
+    skippedCount,
+    createdNodes: nodes.size,
+    createdEdges: edges.size
+  });
+
+  // Create compound parent containers for expanded folders (excluding artificial root)
+  createCompoundContainers(treeNodes, expandedFolders, nodes, shouldExcludeRoot ? rootId : undefined);
+
+  // Create nodes for all included paths that don't exist yet (half-checked folders, excluding artificial root)
+  createIncludedNodes(treeNodes, includedPaths, expandedFolders, nodes, shouldExcludeRoot ? rootId : undefined);
 
   // Convert to Cytoscape elements
   const elements: CytoscapeElement[] = [];
@@ -98,12 +162,15 @@ export function transformToTreeBasedGraphElements(
     });
   });
 
-  console.log('✅ Tree-based graph elements created:', {
-    totalElements: elements.length,
-    containers: containerNodes.length,
-    leafNodes: leafNodes.length,
-    edges: edges.size
-  });
+  // DEBUG: Final node check - only show if config appears
+  const finalNodeIds = elements.filter(e => e.group === 'nodes').map(e => e.data.id);
+  const configNodes = finalNodeIds.filter(id => id?.includes('config'));
+
+  if (configNodes.length > 0) {
+    console.log('🚨 CONFIG FOUND IN FINAL RESULT:', configNodes);
+  }
+
+  console.log('✅ Graph created:', { nodes: finalNodeIds.length, edges: edges.size });
 
   return { elements };
 }
@@ -145,6 +212,37 @@ function getTreeFilteringInfo(treeNodes: Map<string, TreeNode>): {
 }
 
 /**
+ * Determine what display level a file path should use without creating the node
+ */
+function determineDisplayLevel(
+  filePath: string,
+  treeNodes: Map<string, TreeNode>,
+  includedPaths: Set<string>,
+  expandedFolders: Set<string>,
+  collapsedFolders: Set<string>
+): string | null {
+  // Look for half-checked nodes first - they are stopping points
+  const halfCheckedStoppingPoint = findHalfCheckedStoppingPoint(filePath, treeNodes, includedPaths);
+  if (halfCheckedStoppingPoint) {
+    return halfCheckedStoppingPoint;
+  }
+
+  // No half-checked stopping point, use expanded folder logic
+  const expandedParent = findDeepestExpandedParent(filePath, expandedFolders, includedPaths);
+  if (expandedParent) {
+    return findAppropriateDisplayLevel(filePath, expandedParent, expandedFolders);
+  }
+
+  // Look for any included ancestor
+  const includedAncestor = findDeepestIncludedAncestor(filePath, treeNodes, includedPaths);
+  if (includedAncestor) {
+    return includedAncestor;
+  }
+
+  return null;
+}
+
+/**
  * Create a node based on tree filtering state
  * Returns the leaf node ID that should be used for edges
  */
@@ -158,35 +256,17 @@ function createTreeBasedNode(
 ): string | null {
   const pathParts = filePath.split('/').filter(part => part.length > 0);
 
-  console.log('🔍 Creating tree-based node for:', filePath, 'pathParts:', pathParts);
-
-  // Find the most appropriate display level for this file path
-  // Priority: half-checked nodes > expanded folders > collapsed folders
-  let leafNodeId: string | null = null;
-  let displayLevel: string | null = null;
-
-  // Look for half-checked nodes first - they are stopping points
-  const halfCheckedStoppingPoint = findHalfCheckedStoppingPoint(filePath, treeNodes, includedPaths);
-  if (halfCheckedStoppingPoint) {
-    displayLevel = halfCheckedStoppingPoint;
-    console.log('🛑 Half-checked stopping point found:', displayLevel);
-  } else {
-    // No half-checked stopping point, use expanded folder logic
-    const expandedParent = findDeepestExpandedParent(filePath, expandedFolders, includedPaths);
-    if (expandedParent) {
-      displayLevel = findAppropriateDisplayLevel(filePath, expandedParent, expandedFolders);
-      console.log('📂 Expanded parent logic, display level:', displayLevel);
-    } else {
-      // Look for any included ancestor
-      const includedAncestor = findDeepestIncludedAncestor(filePath, treeNodes, includedPaths);
-      if (includedAncestor) {
-        displayLevel = includedAncestor;
-        console.log('📁 Included ancestor found:', displayLevel);
-      }
-    }
+  // Only log config-related node creation
+  if (filePath.includes('config')) {
+    console.log('🔍 Creating config node for:', filePath);
   }
 
-  if (displayLevel) {
+  // Determine the display level using the shared logic
+  const displayLevel = determineDisplayLevel(filePath, treeNodes, includedPaths, expandedFolders, collapsedFolders);
+  let leafNodeId: string | null = null;
+
+  if (displayLevel && includedPaths.has(displayLevel)) {
+    // Only create nodes for paths that are included (checked or half-checked)
     leafNodeId = displayLevel;
     const treeNode = treeNodes.get(displayLevel);
     if (treeNode) {
@@ -198,9 +278,14 @@ function createTreeBasedNode(
       const isFileLevel = displayLevel === filePath;
       createGraphNode(displayLevel, levelLabel, isFileLevel ? 'file' : 'folder', parentContainer, true, nodes);
     }
+  } else if (displayLevel && filePath.includes('config')) {
+    console.log('🚫 Skipping config node creation for unchecked path:', displayLevel);
   }
 
-  console.log('🎯 Final leaf node ID:', leafNodeId);
+  // Only log config-related results
+  if (filePath.includes('config')) {
+    console.log('🎯 Config node result:', leafNodeId);
+  }
   return leafNodeId;
 }
 
@@ -334,37 +419,122 @@ function findExpandedParentContainer(filePath: string, expandedFolders: Set<stri
 }
 
 /**
- * Create compound containers for expanded folders
+ * Create compound containers for expanded folders with proper nesting
  */
 function createCompoundContainers(
   treeNodes: Map<string, TreeNode>,
   expandedFolders: Set<string>,
-  nodes: Map<string, CytoscapeNodeData>
+  nodes: Map<string, CytoscapeNodeData>,
+  rootId?: string
 ): void {
-  // Create container nodes for expanded folders and establish parent-child relationships
-  for (const folderId of expandedFolders) {
+  // First, create all container nodes for expanded folders (process from shallowest to deepest)
+  const sortedFolders = Array.from(expandedFolders).sort((a, b) => a.length - b.length);
+
+  for (const folderId of sortedFolders) {
+    // Skip root node - we don't want to show it in the visualization
+    if (rootId && folderId === rootId) {
+      continue;
+    }
     const treeNode = treeNodes.get(folderId);
     if (!treeNode) continue;
 
+    // Find the parent container for this folder
+    const parentFolderId = findParentExpandedFolder(folderId, expandedFolders);
+
     // Create container node if it doesn't exist
     if (!nodes.has(folderId)) {
-      createGraphNode(folderId, treeNode.label, 'folder', null, false, nodes);
+      createGraphNode(folderId, treeNode.label, 'folder', parentFolderId, false, nodes);
+    } else {
+      // Update existing node to be a container with correct parent
+      const existingNode = nodes.get(folderId)!;
+      existingNode.parent = parentFolderId;
+      existingNode.isLeaf = false;
+      existingNode.isExpanded = true;
+    }
+  }
+
+  // Then, establish parent-child relationships for all other nodes
+  for (const nodeData of nodes.values()) {
+    if (nodeData.parent || expandedFolders.has(nodeData.id)) continue; // Skip if already has parent or is container
+
+    // Find the deepest expanded folder that contains this node
+    const parentFolderId = findDeepestExpandedContainer(nodeData.id, expandedFolders, rootId);
+    if (parentFolderId && parentFolderId !== nodeData.id) {
+      nodeData.parent = parentFolderId;
+    }
+  }
+}
+
+/**
+ * Create nodes for all included paths that don't exist yet (half-checked folders)
+ */
+function createIncludedNodes(
+  treeNodes: Map<string, TreeNode>,
+  includedPaths: Set<string>,
+  expandedFolders: Set<string>,
+  nodes: Map<string, CytoscapeNodeData>,
+  rootId?: string
+): void {
+  // Create nodes for all included paths that aren't already created
+  for (const includedPath of includedPaths) {
+    // Skip root node - we don't want to show it in the visualization
+    if (rootId && includedPath === rootId) {
+      continue;
     }
 
-    // Set up parent-child relationships for nodes within this folder
-    for (const nodeData of nodes.values()) {
-      if (nodeData.id.startsWith(folderId + '/') && nodeData.id !== folderId) {
-        // This node is a child of the expanded folder
-        const nodePathParts = nodeData.id.split('/');
-        const folderPathParts = folderId.split('/');
+    if (!nodes.has(includedPath)) {
+      const treeNode = treeNodes.get(includedPath);
+      if (treeNode) {
+        // Find the parent for this node
+        const parentFolderId = findDeepestExpandedContainer(includedPath, expandedFolders, rootId);
 
-        // Check if this is a direct child (not grandchild)
-        if (nodePathParts.length === folderPathParts.length + 1) {
-          nodeData.parent = folderId;
-        }
+        // Determine if this should be a leaf node or container
+        const isLeaf = treeNode.checkboxState === 'half-checked' || treeNode.type === 'file';
+
+        createGraphNode(includedPath, treeNode.label, treeNode.type, parentFolderId, isLeaf, nodes);
       }
     }
   }
+}
+
+/**
+ * Find the parent expanded folder for a given folder
+ */
+function findParentExpandedFolder(folderId: string, expandedFolders: Set<string>): string | null {
+  const pathParts = folderId.split('/');
+
+  // Check parent paths from immediate parent to root
+  for (let i = pathParts.length - 1; i > 0; i--) {
+    const parentPath = pathParts.slice(0, i).join('/');
+    if (expandedFolders.has(parentPath)) {
+      return parentPath;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find the deepest expanded folder that contains a given node (for container assignment)
+ */
+function findDeepestExpandedContainer(nodeId: string, expandedFolders: Set<string>, rootId?: string): string | null {
+  const pathParts = nodeId.split('/');
+  let deepestParent: string | null = null;
+
+  // Check all possible parent paths from deepest to shallowest
+  for (let i = pathParts.length - 1; i > 0; i--) {
+    const parentPath = pathParts.slice(0, i).join('/');
+    if (expandedFolders.has(parentPath)) {
+      // Skip root node as a parent - we want children to float freely instead
+      if (rootId && parentPath === rootId) {
+        continue;
+      }
+      deepestParent = parentPath;
+      break; // Take the deepest (longest) match
+    }
+  }
+
+  return deepestParent;
 }
 
 /**
@@ -400,19 +570,22 @@ function normalizePath(path: string): string {
   let normalized = path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
 
   // Strip system/temp path prefixes to get project-relative paths
-  // This handles paths like: tmp/chronograph/flutter-samples-cache/compass_app/app/lib/...
+  // This handles paths like: tmp/chronograph/invoiceninja-admin-portal-cache/lib/...
   // And converts them to: lib/...
   const systemPrefixPatterns = [
-    /^tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//,  // tmp/chronograph/cache/repo/subfolder/
-    /^\/tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//, // /tmp/chronograph/cache/repo/subfolder/
-    /^[A-Z]:\/tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//, // Windows temp paths
+    /^tmp\/chronograph\/[^\/]+\/[^\/]+\/app\//, // tmp/chronograph/cache/project_name/app/ (Flutter projects)
+    /^tmp\/chronograph\/[^\/]+\//,  // tmp/chronograph/cache/ (keep everything after cache name)
+    /^\/tmp\/chronograph\/[^\/]+\/[^\/]+\/app\//, // /tmp/chronograph/cache/project_name/app/ (Flutter projects)
+    /^\/tmp\/chronograph\/[^\/]+\//, // /tmp/chronograph/cache/ (keep everything after cache name)
+    /^[A-Z]:\/tmp\/chronograph\/[^\/]+\/[^\/]+\/app\//, // Windows temp paths for Flutter
+    /^[A-Z]:\/tmp\/chronograph\/[^\/]+\//, // Windows temp paths
   ];
 
   for (const pattern of systemPrefixPatterns) {
     if (pattern.test(normalized)) {
       const before = normalized;
       normalized = normalized.replace(pattern, '');
-      console.log('🔧 Stripped system prefix from path:', before, '->', normalized);
+      //console.log('🔧 Stripped system prefix from path:', before, '->', normalized);
       break;
     }
   }

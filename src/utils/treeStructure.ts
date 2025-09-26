@@ -53,6 +53,11 @@ export function buildProjectTreeFromLakos(dependencies: Dependency[]): ProjectTr
     samplePaths: pathArray.slice(0, 3)
   });
 
+  console.log('🌳 CRITICAL DEBUG - All cleaned paths (first 20):');
+  pathArray.slice(0, 20).forEach((path, index) => {
+    console.log(`   [${index.toString().padStart(2, '0')}] ${path}`);
+  });
+
 
   const nodes = new Map<string, TreeNode>();
 
@@ -265,8 +270,8 @@ function findCommonRoot(paths: string[]): string {
     if (singleLevelPrefixes.length > 0) {
       const rootCandidate = singleLevelPrefixes[0];
       const allPathsStartWithCandidate = paths.every(path => {
-        const firstPart = path.split('/')[1]; // Skip leading slash
-        return firstPart === rootCandidate;
+        const parts = path.split('/').filter(part => part.length > 0); // Filter empty parts correctly
+        return parts.length > 0 && parts[0] === rootCandidate;
       });
 
       if (allPathsStartWithCandidate) {
@@ -337,7 +342,7 @@ function createTreePath(filePath: string, rootName: string, nodes: Map<string, T
       nodes.set(nodeId, {
         id: nodeId,
         label,
-        fullPath: filePath,
+        fullPath: isFile ? filePath : nodeId, // Use nodeId for folders, filePath for files
         type: isFile ? 'file' : 'folder',
         children: [],
         checkboxState: 'checked',
@@ -374,15 +379,37 @@ function establishTreeRelationships(nodes: Map<string, TreeNode>, rootId: string
         if (!parentNode.children.includes(node.id)) {
           parentNode.children.push(node.id);
         }
+      } else {
+        console.error(`🚨 PARENT NOT FOUND for node '${node.id}' - looking for parent '${parentId}'`);
+        console.error(`   Available node IDs:`, Array.from(nodes.keys()).slice(0, 20));
       }
     }
   }
 
-  // Debug output
+  // Debug output for path collision investigation
   console.log('🔗 Tree relationships established:');
   console.log(`   Root (${rootId}) children:`, rootNode?.children);
   console.log('   Total nodes:', nodes.size);
-  console.log('   Sample nodes:', Array.from(nodes.keys()).slice(0, 10));
+
+  // Look for potential path collision issues
+  const authNodes = Array.from(nodes.keys()).filter(key => key.includes('auth'));
+  const bankAccountNodes = Array.from(nodes.keys()).filter(key => key.includes('bank_account'));
+
+  if (authNodes.length > 0) {
+    console.log('🔍 AUTH nodes found:', authNodes);
+    authNodes.forEach(authId => {
+      const authNode = nodes.get(authId);
+      console.log(`   Auth node '${authId}': parent='${authNode?.parent}', children=[${authNode?.children.join(', ')}]`);
+    });
+  }
+
+  if (bankAccountNodes.length > 0) {
+    console.log('🔍 BANK_ACCOUNT nodes found:', bankAccountNodes);
+    bankAccountNodes.forEach(bankId => {
+      const bankNode = nodes.get(bankId);
+      console.log(`   Bank node '${bankId}': parent='${bankNode?.parent}', children=[${bankNode?.children.join(', ')}]`);
+    });
+  }
 
   // Sort children by type (folders first) then alphabetically
   for (const node of nodes.values()) {
@@ -408,9 +435,56 @@ function establishTreeRelationships(nodes: Map<string, TreeNode>, rootId: string
  * Initialize checkbox states based on tree hierarchy
  */
 function initializeCheckboxStates(nodes: Map<string, TreeNode>, rootId: string): void {
-  // Initialize all nodes as checked (expanded view by default)
+  // Smart initialization: root checked, first-level folders half-checked, first-level files checked
+  // This prevents massive initial load times
+
+  const rootNode = nodes.get(rootId);
+  if (!rootNode) return;
+
+  // Set root as checked (expanded)
+  rootNode.checkboxState = 'checked';
+
+  // Handle direct children of root
+  for (const childId of rootNode.children) {
+    const childNode = nodes.get(childId);
+    if (!childNode) continue;
+
+    if (childNode.type === 'folder') {
+      // First-level folders are half-checked (visible but collapsed)
+      childNode.checkboxState = 'half-checked';
+      // Set all descendants of half-checked folders to unchecked
+      setDescendantsUnchecked(childId, nodes);
+    } else {
+      // First-level files are checked (visible)
+      childNode.checkboxState = 'checked';
+    }
+  }
+
+  // All other nodes (deeper than first level) start as unchecked
   for (const node of nodes.values()) {
-    node.checkboxState = 'checked';
+    if (node.id === rootId) continue; // Skip root
+    if (rootNode.children.includes(node.id)) continue; // Skip first-level children (already handled)
+
+    // All deeper nodes start unchecked
+    if (node.checkboxState === undefined) {
+      node.checkboxState = 'unchecked';
+    }
+  }
+}
+
+/**
+ * Helper function to set all descendants of a node to unchecked
+ */
+function setDescendantsUnchecked(nodeId: string, nodes: Map<string, TreeNode>): void {
+  const node = nodes.get(nodeId);
+  if (!node) return;
+
+  for (const childId of node.children) {
+    const childNode = nodes.get(childId);
+    if (childNode) {
+      childNode.checkboxState = 'unchecked';
+      setDescendantsUnchecked(childId, nodes); // Recursively set grandchildren
+    }
   }
 }
 
@@ -465,19 +539,22 @@ function normalizePath(path: string): string {
   let normalized = path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/|\/$/, '');
 
   // Strip system/temp path prefixes to get project-relative paths
-  // This handles paths like: tmp/chronograph/flutter-samples-cache/compass_app/app/lib/...
+  // This handles paths like: tmp/chronograph/invoiceninja-admin-portal-cache/lib/...
   // And converts them to: lib/...
   const systemPrefixPatterns = [
-    /^tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//,  // tmp/chronograph/cache/repo/subfolder/
-    /^\/tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//, // /tmp/chronograph/cache/repo/subfolder/
-    /^[A-Z]:\/tmp\/chronograph\/[^\/]+\/[^\/]+\/[^\/]+\//, // Windows temp paths
+    /^tmp\/chronograph\/[^\/]+\/[^\/]+\/app\//, // tmp/chronograph/cache/project_name/app/ (Flutter projects)
+    /^tmp\/chronograph\/[^\/]+\//,  // tmp/chronograph/cache/ (keep everything after cache name)
+    /^\/tmp\/chronograph\/[^\/]+\/[^\/]+\/app\//, // /tmp/chronograph/cache/project_name/app/ (Flutter projects)
+    /^\/tmp\/chronograph\/[^\/]+\//, // /tmp/chronograph/cache/ (keep everything after cache name)
+    /^[A-Z]:\/tmp\/chronograph\/[^\/]+\/[^\/]+\/app\//, // Windows temp paths for Flutter
+    /^[A-Z]:\/tmp\/chronograph\/[^\/]+\//, // Windows temp paths
   ];
 
   for (const pattern of systemPrefixPatterns) {
     if (pattern.test(normalized)) {
       const before = normalized;
       normalized = normalized.replace(pattern, '');
-      console.log('🔧 Stripped system prefix from path:', before, '->', normalized);
+      console.log(`🔧 Normalized: ${before} → ${normalized}`);
       break;
     }
   }
@@ -506,8 +583,7 @@ function propagateDownward(nodeId: string, state: CheckboxState, nodes: Map<stri
       // file children become checked
       if (childNode.type === 'folder') {
         childNode.checkboxState = 'half-checked';
-        // Half-checked folders have unchecked children (contracted view)
-        propagateDownward(childId, 'half-checked', nodes);
+        // Don't automatically propagate here - let half-checked state be handled separately
       } else {
         childNode.checkboxState = 'checked';
       }
@@ -550,24 +626,15 @@ function propagateUpward(nodeId: string, nodes: Map<string, TreeNode>): void {
   const totalCount = childStates.length;
 
   // Determine parent state based on children
+  // RULE: If ANY child is checked or half-checked, parent MUST be checked
   let newParentState: CheckboxState;
 
-  if (checkedCount === totalCount) {
-    // All children are checked -> parent is checked (fully expanded)
+  if (checkedCount > 0 || halfCheckedCount > 0) {
+    // If ANY child is checked or half-checked -> parent MUST be checked
     newParentState = 'checked';
-  } else if (uncheckedCount === totalCount) {
-    // All children are unchecked -> parent is unchecked (not visible)
-    newParentState = 'unchecked';
   } else {
-    // Mixed states or has half-checked children
-    // IMPORTANT: Don't automatically change parent from checked to half-checked
-    // If parent is already checked, keep it checked (user wants to see the mixed children)
-    // Only make parent half-checked if it wasn't already checked
-    if (parentNode.checkboxState === 'checked') {
-      newParentState = 'checked'; // Keep parent checked to show mixed children
-    } else {
-      newParentState = 'half-checked'; // Parent becomes half-checked only if not already checked
-    }
+    // ALL children are unchecked -> parent becomes unchecked
+    newParentState = 'unchecked';
   }
 
   // Update parent if it changed and continue upward

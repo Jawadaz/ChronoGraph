@@ -158,11 +158,41 @@ describe('Tree Structure', () => {
       expect(assetsNode?.parent).toBe('lib/config');
     });
 
-    it('should initialize all nodes as checked by default', () => {
+    it('should initialize with smart default states to prevent massive initial load', () => {
       const tree = buildProjectTreeFromLakos(sampleDependencies);
 
+      // Root should be checked
+      const rootNode = tree.nodes.get(tree.rootId);
+      expect(rootNode?.checkboxState).toBe('checked');
+
+      // First-level folders should be half-checked (visible but collapsed)
+      const firstLevelFolders = rootNode?.children.filter(childId => {
+        const child = tree.nodes.get(childId);
+        return child?.type === 'folder';
+      }) || [];
+
+      firstLevelFolders.forEach(folderId => {
+        const folderNode = tree.nodes.get(folderId);
+        expect(folderNode?.checkboxState).toBe('half-checked');
+      });
+
+      // First-level files should be checked (visible)
+      const firstLevelFiles = rootNode?.children.filter(childId => {
+        const child = tree.nodes.get(childId);
+        return child?.type === 'file';
+      }) || [];
+
+      firstLevelFiles.forEach(fileId => {
+        const fileNode = tree.nodes.get(fileId);
+        expect(fileNode?.checkboxState).toBe('checked');
+      });
+
+      // Deeper nodes should be unchecked
       for (const node of tree.nodes.values()) {
-        expect(node.checkboxState).toBe('checked');
+        if (node.id === tree.rootId) continue; // Skip root
+        if (rootNode?.children.includes(node.id)) continue; // Skip first-level children
+
+        expect(node.checkboxState).toBe('unchecked');
       }
     });
   });
@@ -179,10 +209,10 @@ describe('Tree Structure', () => {
 
       const { includedPaths, expandedFolders } = getFilteredPathsFromTree(updatedTree);
 
-      // Should include lib and its contents, but not integration_test
+      // Should include lib (checked) and lib/config (half-checked), but not unchecked children
       expect(includedPaths.has('lib')).toBe(true);
       expect(includedPaths.has('lib/config')).toBe(true);
-      expect(includedPaths.has('lib/config/assets.dart')).toBe(true);
+      expect(includedPaths.has('lib/config/assets.dart')).toBe(false); // unchecked files not included
       expect(includedPaths.has('integration_test')).toBe(false);
       expect(includedPaths.has('integration_test/app_local_data_test.dart')).toBe(false);
     });
@@ -214,9 +244,9 @@ describe('Tree Structure', () => {
       const configNode = updatedTree.get('lib/config');
       expect(configNode?.checkboxState).toBe('half-checked');
 
-      // Files under lib should be checked
+      // Files under half-checked folders should be unchecked (contracted view)
       const assetsNode = updatedTree.get('lib/config/assets.dart');
-      expect(assetsNode?.checkboxState).toBe('checked');
+      expect(assetsNode?.checkboxState).toBe('unchecked');
     });
 
     it('should propagate unchecked state to all children', () => {
@@ -231,6 +261,168 @@ describe('Tree Structure', () => {
 
       const assetsNode = updatedTree.get('lib/config/assets.dart');
       expect(assetsNode?.checkboxState).toBe('unchecked');
+    });
+
+    describe('Upward propagation rules', () => {
+      it('should make parent checked when any child folder is checked', () => {
+        const tree = buildProjectTreeFromLakos(sampleDependencies);
+
+        // Start with everything unchecked
+        let updatedTree = updateCheckboxState(tree.rootId, 'unchecked', tree.nodes);
+
+        // Check a nested folder: lib/config
+        updatedTree = updateCheckboxState('lib/config', 'checked', updatedTree);
+
+        // Parent lib should become checked because lib/config is checked
+        const libNode = updatedTree.get('lib');
+        expect(libNode?.checkboxState).toBe('checked');
+
+        // Root should become checked because lib is checked
+        const rootNode = updatedTree.get(tree.rootId);
+        expect(rootNode?.checkboxState).toBe('checked');
+      });
+
+      it('should make parent checked when any child folder is half-checked', () => {
+        const tree = buildProjectTreeFromLakos(sampleDependencies);
+
+        // Start with everything unchecked
+        let updatedTree = updateCheckboxState(tree.rootId, 'unchecked', tree.nodes);
+
+        // Set a nested folder to half-checked: lib/config
+        updatedTree = updateCheckboxState('lib/config', 'half-checked', updatedTree);
+
+        // Parent lib should become checked because lib/config is half-checked
+        const libNode = updatedTree.get('lib');
+        expect(libNode?.checkboxState).toBe('checked');
+
+        // Root should become checked because lib is checked
+        const rootNode = updatedTree.get(tree.rootId);
+        expect(rootNode?.checkboxState).toBe('checked');
+      });
+
+      it('should make parent checked when any child file is checked', () => {
+        const tree = buildProjectTreeFromLakos(sampleDependencies);
+
+        // Start with everything unchecked
+        let updatedTree = updateCheckboxState(tree.rootId, 'unchecked', tree.nodes);
+
+        // Check a single file: lib/config/assets.dart
+        updatedTree = updateCheckboxState('lib/config/assets.dart', 'checked', updatedTree);
+
+        // Immediate parent lib/config should become checked
+        const configNode = updatedTree.get('lib/config');
+        expect(configNode?.checkboxState).toBe('checked');
+
+        // lib should become checked because lib/config is checked
+        const libNode = updatedTree.get('lib');
+        expect(libNode?.checkboxState).toBe('checked');
+
+        // Root should become checked because lib is checked
+        const rootNode = updatedTree.get(tree.rootId);
+        expect(rootNode?.checkboxState).toBe('checked');
+      });
+
+      it('should make parent unchecked only when ALL children are unchecked', () => {
+        const tree = buildProjectTreeFromLakos(sampleDependencies);
+
+        // Start by ensuring lib/config and its children are checked (override smart initialization for this test)
+        let updatedTree = updateCheckboxState('lib/config', 'checked', tree.nodes);
+
+        // Verify initial state: both files should be checked now
+        expect(updatedTree.get('lib/config/dependencies.dart')?.checkboxState).toBe('checked');
+        expect(updatedTree.get('lib/config/assets.dart')?.checkboxState).toBe('checked');
+
+        // Uncheck one child (dependencies.dart)
+        updatedTree = updateCheckboxState('lib/config/dependencies.dart', 'unchecked', updatedTree);
+
+        // lib/config should still be checked because assets.dart is still checked
+        const configNode = updatedTree.get('lib/config');
+        expect(configNode?.checkboxState).toBe('checked');
+
+        // Now uncheck the last file
+        updatedTree = updateCheckboxState('lib/config/assets.dart', 'unchecked', updatedTree);
+
+        // lib/config should become unchecked because ALL children are unchecked
+        const configNodeAfter = updatedTree.get('lib/config');
+        expect(configNodeAfter?.checkboxState).toBe('unchecked');
+      });
+
+      it('should handle mixed child states correctly', () => {
+        const tree = buildProjectTreeFromLakos(sampleDependencies);
+
+        // Start with everything unchecked
+        let updatedTree = updateCheckboxState(tree.rootId, 'unchecked', tree.nodes);
+
+        // Create a mixed scenario under lib:
+        // - lib/config: checked
+        // - lib/domain: half-checked
+        // - lib/data: unchecked
+        // - lib/ui: unchecked
+        updatedTree = updateCheckboxState('lib/config', 'checked', updatedTree);
+        updatedTree = updateCheckboxState('lib/domain', 'half-checked', updatedTree);
+        // lib/data and lib/ui remain unchecked
+
+        // lib should be checked because it has checked and half-checked children
+        const libNode = updatedTree.get('lib');
+        expect(libNode?.checkboxState).toBe('checked');
+
+        // Root should be checked because lib is checked
+        const rootNode = updatedTree.get(tree.rootId);
+        expect(rootNode?.checkboxState).toBe('checked');
+      });
+
+      it('should handle deep nesting upward propagation', () => {
+        // Create deeper dependencies for testing
+        const deepDependencies: Dependency[] = [
+          {
+            source_file: '/lib/features/auth/presentation/pages/login_page.dart',
+            target_file: '/lib/features/auth/domain/entities/user.dart',
+            relationship_type: 'import'
+          },
+          {
+            source_file: '/lib/features/auth/data/repositories/auth_repository_impl.dart',
+            target_file: '/lib/features/auth/domain/repositories/auth_repository.dart',
+            relationship_type: 'import'
+          }
+        ];
+
+        const tree = buildProjectTreeFromLakos(deepDependencies);
+
+        // Start with everything unchecked
+        let updatedTree = updateCheckboxState(tree.rootId, 'unchecked', tree.nodes);
+
+        // Check a deeply nested file
+        updatedTree = updateCheckboxState('lib/features/auth/presentation/pages/login_page.dart', 'checked', updatedTree);
+
+        // All parents should become checked due to upward propagation
+        expect(updatedTree.get('lib/features/auth/presentation/pages')?.checkboxState).toBe('checked');
+        expect(updatedTree.get('lib/features/auth/presentation')?.checkboxState).toBe('checked');
+        expect(updatedTree.get('lib/features/auth')?.checkboxState).toBe('checked');
+        expect(updatedTree.get('lib/features')?.checkboxState).toBe('checked');
+        expect(updatedTree.get('lib')?.checkboxState).toBe('checked');
+        expect(updatedTree.get(tree.rootId)?.checkboxState).toBe('checked');
+      });
+
+      it('should work correctly when checking multiple scattered files', () => {
+        const tree = buildProjectTreeFromLakos(sampleDependencies);
+
+        // Start with everything unchecked
+        let updatedTree = updateCheckboxState(tree.rootId, 'unchecked', tree.nodes);
+
+        // Check files in different branches
+        updatedTree = updateCheckboxState('lib/config/assets.dart', 'checked', updatedTree);
+        updatedTree = updateCheckboxState('integration_test/app_local_data_test.dart', 'checked', updatedTree);
+
+        // Both lib and integration_test should be checked
+        expect(updatedTree.get('lib')?.checkboxState).toBe('checked');
+        expect(updatedTree.get('integration_test')?.checkboxState).toBe('checked');
+
+        // Root should be checked because both children are checked
+        expect(updatedTree.get(tree.rootId)?.checkboxState).toBe('checked');
+
+        // Intermediate folders should also be checked
+        expect(updatedTree.get('lib/config')?.checkboxState).toBe('checked');
+      });
     });
   });
 
@@ -427,6 +619,68 @@ describe('Tree Structure', () => {
       expect(rootNode?.children).toContain('integration_test');
 
       console.log('✅ Flutter app root detection test passed');
+    });
+  });
+
+  describe('Path Normalization', () => {
+    it('should normalize Invoice Ninja admin portal paths correctly', () => {
+      // Test the specific path normalization issue that was fixed
+      const invoiceNinjaDependencies: Dependency[] = [
+        {
+          source_file: 'tmp/chronograph/invoiceninja-admin-portal-cache/lib/data/models/client_model.dart',
+          target_file: 'tmp/chronograph/invoiceninja-admin-portal-cache/lib/redux/auth/auth_actions.dart',
+          relationship_type: 'import'
+        },
+        {
+          source_file: 'tmp/chronograph/invoiceninja-admin-portal-cache/lib/ui/auth/login_view.dart',
+          target_file: 'tmp/chronograph/invoiceninja-admin-portal-cache/lib/data/file_storage.dart',
+          relationship_type: 'import'
+        }
+      ];
+
+      const tree = buildProjectTreeFromLakos(invoiceNinjaDependencies);
+
+      // Root should be 'lib' (not 'project' fallback)
+      expect(tree.rootId).toBe('lib');
+
+      // Should have proper nested structure
+      const libDataModels = tree.nodes.get('lib/data/models');
+      expect(libDataModels).toBeDefined();
+      expect(libDataModels?.type).toBe('folder');
+
+      const libReduxAuth = tree.nodes.get('lib/redux/auth');
+      expect(libReduxAuth).toBeDefined();
+      expect(libReduxAuth?.type).toBe('folder');
+
+      const libUiAuth = tree.nodes.get('lib/ui/auth');
+      expect(libUiAuth).toBeDefined();
+      expect(libUiAuth?.type).toBe('folder');
+
+      // Files should be nested under their proper folders, not at root
+      const clientModel = tree.nodes.get('lib/data/models/client_model.dart');
+      expect(clientModel).toBeDefined();
+      expect(clientModel?.parent).toBe('lib/data/models');
+
+      const fileStorage = tree.nodes.get('lib/data/file_storage.dart');
+      expect(fileStorage).toBeDefined();
+      expect(fileStorage?.parent).toBe('lib/data');
+
+      // Should not have random top-level folders like 'models', 'auth', etc.
+      const rootNode = tree.nodes.get(tree.rootId);
+      const topLevelFolders = rootNode?.children.filter(childId => {
+        const child = tree.nodes.get(childId);
+        return child?.type === 'folder';
+      }) || [];
+
+      // Should have proper lib structure, not scattered folders
+      expect(topLevelFolders).toContain('lib/data');
+      expect(topLevelFolders).toContain('lib/redux');
+      expect(topLevelFolders).toContain('lib/ui');
+
+      // Should NOT have these at top level (they should be under lib/)
+      expect(topLevelFolders).not.toContain('models');
+      expect(topLevelFolders).not.toContain('auth');
+      expect(topLevelFolders).not.toContain('data');
     });
   });
 });

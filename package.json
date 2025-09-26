@@ -14,7 +14,7 @@
     "dev:debug": "set NODE_OPTIONS=--inspect && vite",
     "test": "jest",
     "tauri": "tauri",
-    "tauri:dev": "concurrently \"vite --port 1426\" \"tauri dev\" --kill-others-on-fail",
+    "tauri:dev": "concurrently \"vite --port 1429\" \"tauri dev\" --kill-others-on-fail",
     "tauri:dev-debug": "concurrently \"npm run dev:debug\" \"tauri dev\" --kill-others-on-fail",
     "tauri:build": "tauri build"
   },
