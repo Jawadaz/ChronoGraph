@@ -1,5 +1,6 @@
 use crate::chronograph_engine::{ChronoGraphEngine, ChronoGraphConfig, AnalysisProgress, CommitSnapshot};
 use crate::lakos_analyzer::LakosAnalyzer;
+use crate::analysis_cache::CacheStatistics;
 // Removed unused PathBuf import
 use tauri::State;
 use std::sync::{Arc, Mutex};
@@ -493,6 +494,59 @@ pub async fn update_cached_repository(repo_name: String) -> Result<(), String> {
     } else {
         return Err("Repository cache not found".to_string());
     }
-    
+
     Ok(())
+}
+
+/// Get cache statistics
+#[tauri::command]
+pub async fn get_cache_statistics(
+    state: State<'_, ChronoGraphState>,
+) -> Result<Option<CacheStatistics>, String> {
+    let mut state_guard = state.lock().map_err(|e| e.to_string())?;
+    if let Some(ref mut engine) = state_guard.as_mut() {
+        Ok(engine.get_cache_statistics())
+    } else {
+        Ok(None)
+    }
+}
+
+/// Clear analysis cache for current repository
+#[tauri::command]
+pub async fn clear_repository_cache(
+    state: State<'_, ChronoGraphState>,
+) -> Result<usize, String> {
+    let mut state_guard = state.lock().map_err(|e| e.to_string())?;
+    if let Some(ref mut engine) = state_guard.as_mut() {
+        engine.clear_repository_cache().map_err(|e| e.to_string())
+    } else {
+        Ok(0)
+    }
+}
+
+/// Cleanup old cache entries
+#[tauri::command]
+pub async fn cleanup_old_cache(
+    max_age_days: u64,
+    state: State<'_, ChronoGraphState>,
+) -> Result<usize, String> {
+    let mut state_guard = state.lock().map_err(|e| e.to_string())?;
+    if let Some(ref mut engine) = state_guard.as_mut() {
+        engine.cleanup_old_cache(max_age_days).map_err(|e| e.to_string())
+    } else {
+        Ok(0)
+    }
+}
+
+/// Clear entire analysis cache
+#[tauri::command]
+pub async fn clear_all_cache(
+    state: State<'_, ChronoGraphState>,
+) -> Result<usize, String> {
+    let mut state_guard = state.lock().map_err(|e| e.to_string())?;
+    if let Some(ref mut engine) = state_guard.as_mut() {
+        engine.clear_all_cache().map_err(|e| e.to_string())
+    } else {
+        Ok(0)
+    }
 }

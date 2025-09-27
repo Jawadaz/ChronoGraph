@@ -5,6 +5,7 @@ pub mod dependency_analyzer;
 pub mod lakos_analyzer;
 pub mod chronograph_engine;
 pub mod chronograph_commands;
+pub mod analysis_cache;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -51,6 +52,11 @@ pub fn run() {
             chronograph_commands::cleanup_cached_repository,
             chronograph_commands::cleanup_all_cached_repositories,
             chronograph_commands::update_cached_repository,
+            // Analysis cache management commands
+            chronograph_commands::get_cache_statistics,
+            chronograph_commands::clear_repository_cache,
+            chronograph_commands::cleanup_old_cache,
+            chronograph_commands::clear_all_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

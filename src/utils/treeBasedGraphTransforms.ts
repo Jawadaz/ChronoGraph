@@ -141,7 +141,7 @@ export function transformToTreeBasedGraphElements(
     elements.push({
       group: 'nodes',
       data: nodeData,
-      classes: [nodeData.type, 'container', 'expanded']
+      classes: [nodeData.type, 'expanded']
     });
   });
 

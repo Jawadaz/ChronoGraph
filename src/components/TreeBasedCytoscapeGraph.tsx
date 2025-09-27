@@ -40,6 +40,9 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     const cy = cytoscape({
       container: containerRef.current,
 
+      // Enable compound nodes for hierarchical containers
+      compound: true,
+
       // Initial empty state
       elements: [],
 
@@ -483,30 +486,6 @@ const getTreeBasedCytoscapeStyles = (
     }
   },
 
-  // Expanded folder nodes (container parents)
-  {
-    selector: 'node[type="folder"].container',
-    style: {
-      'shape': 'round-rectangle',
-      'background-color': '#f8fafc',
-      'background-opacity': 0.6,
-      'border-width': '2px',
-      'border-color': '#94a3b8',
-      'border-style': 'dashed',
-      'label': 'data(label)',
-      'font-size': `${Math.max(sizes.fontSize + 2, 8)}px`,
-      'font-weight': 'bold',
-      'text-valign': 'top',
-      'text-halign': 'center',
-      'text-margin-y': '10px',
-      'color': '#1e293b',
-      'compound-sizing-wrt-labels': 'include',
-      'min-width': '120px',
-      'min-height': '80px',
-      'padding': '20px',
-      'z-index': 1
-    }
-  },
 
   // Parent nodes (Cytoscape compound pattern)
   {

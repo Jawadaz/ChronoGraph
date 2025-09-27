@@ -1,6 +1,7 @@
 use crate::git_navigator::{GitTemporalNavigator, CommitInfo, RepoCloneInfo};
 use crate::dependency_analyzer::{AnalyzerRegistry, DependencyAnalyzer, AnalysisConfig, AnalysisResult};
 use crate::lakos_analyzer::LakosAnalyzer;
+use crate::analysis_cache::{AnalysisCache, AnalysisCacheKey, CacheStatistics};
 use std::path::PathBuf;
 use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
@@ -72,21 +73,42 @@ pub struct ChronoGraphEngine {
     git_navigator: Option<GitTemporalNavigator>,
     analyzer_registry: AnalyzerRegistry,
     snapshots: Vec<CommitSnapshot>,
+    cache: Option<AnalysisCache>,
 }
 
 impl ChronoGraphEngine {
     pub fn new(config: ChronoGraphConfig) -> Self {
         let mut registry = AnalyzerRegistry::new();
-        
+
         // Register Lakos analyzer by default
         registry.register(Box::new(LakosAnalyzer::new()));
-        
+
+        // Initialize cache
+        let cache = Self::initialize_cache(&config).ok();
+        if cache.is_none() {
+            eprintln!("Warning: Failed to initialize analysis cache, running without cache");
+        }
+
         Self {
             config,
             git_navigator: None,
             analyzer_registry: registry,
             snapshots: Vec::new(),
+            cache,
         }
+    }
+
+    /// Initialize the analysis cache
+    fn initialize_cache(config: &ChronoGraphConfig) -> Result<AnalysisCache> {
+        // Get user cache directory or fallback to temp
+        let cache_dir = if let Some(cache_dir) = dirs::cache_dir() {
+            cache_dir.join("chronograph")
+        } else {
+            config.local_base_dir.join(".cache")
+        };
+
+        AnalysisCache::new(cache_dir)
+            .context("Failed to initialize analysis cache")
     }
     
     /// Start the complete analysis process
@@ -369,42 +391,73 @@ impl ChronoGraphEngine {
     
     /// Analyze dependencies at a specific commit
     fn analyze_commit(
-        &self, 
-        git_navigator: &mut GitTemporalNavigator, 
+        &mut self,
+        git_navigator: &mut GitTemporalNavigator,
         commit_info: &CommitInfo
     ) -> Result<CommitSnapshot> {
         // Checkout the commit
         git_navigator.checkout_commit(&commit_info.hash)
             .context("Failed to checkout commit")?;
-            
+
         // Get the analyzer
         let analyzer = self.analyzer_registry
             .get_analyzer(&self.config.analyzer_name)
             .ok_or_else(|| anyhow::anyhow!("Analyzer '{}' not found", self.config.analyzer_name))?;
-        
+
         // Determine analysis path (subfolder or root)
         let base_project_path = git_navigator.local_path();
         let analysis_path = if let Some(ref subfolder) = self.config.subfolder {
             let subfolder_path = base_project_path.join(subfolder);
             if !subfolder_path.exists() {
-                anyhow::bail!("Subfolder '{}' does not exist at commit {}", 
+                anyhow::bail!("Subfolder '{}' does not exist at commit {}",
                              subfolder, commit_info.hash);
             }
             subfolder_path
         } else {
             base_project_path.to_path_buf()
         };
-        
+
         // Verify project can be analyzed at this commit
         if !analyzer.can_analyze_project(&analysis_path) {
-            anyhow::bail!("Project cannot be analyzed by {} at commit {} (path: {})", 
+            anyhow::bail!("Project cannot be analyzed by {} at commit {} (path: {})",
                          analyzer.name(), commit_info.hash, analysis_path.display());
         }
-        
+
+        // Try to get analysis result from cache first
+        let cache_key = AnalysisCacheKey::new(
+            self.config.github_url.clone(),
+            commit_info.hash.clone(),
+            self.config.subfolder.clone(),
+            self.config.analyzer_name.clone(),
+            &self.config.analysis_config,
+        );
+
+        // Check cache if available
+        if let Some(ref mut cache) = self.cache {
+            if let Ok(Some(cached_result)) = cache.get(&cache_key) {
+                println!("✅ Cache hit for commit {}", &commit_info.hash[..8]);
+                return Ok(CommitSnapshot {
+                    commit_info: commit_info.clone(),
+                    analysis_result: cached_result,
+                    project_path: analysis_path,
+                });
+            }
+        }
+
+        println!("🔄 Cache miss, analyzing commit {}", &commit_info.hash[..8]);
+
         // Run analysis on the specified path
         let analysis_result = analyzer.analyze_project(&analysis_path, &self.config.analysis_config)
             .context("Failed to run dependency analysis")?;
-        
+
+        // Store result in cache if available
+        if let Some(ref mut cache) = self.cache {
+            if let Err(e) = cache.put(&cache_key, &analysis_result) {
+                eprintln!("Warning: Failed to cache analysis result for commit {}: {}",
+                         commit_info.hash, e);
+            }
+        }
+
         Ok(CommitSnapshot {
             commit_info: commit_info.clone(),
             analysis_result,
@@ -440,6 +493,39 @@ impl ChronoGraphEngine {
     /// List available analyzers
     pub fn list_analyzers(&self) -> Vec<crate::dependency_analyzer::AnalyzerInfo> {
         self.analyzer_registry.list_analyzers()
+    }
+
+    /// Get cache statistics
+    pub fn get_cache_statistics(&mut self) -> Option<CacheStatistics> {
+        self.cache.as_mut().and_then(|cache| cache.get_statistics().ok())
+    }
+
+    /// Clear cache for current repository
+    pub fn clear_repository_cache(&mut self) -> Result<usize> {
+        if let Some(ref mut cache) = self.cache {
+            let removed_files = cache.remove_repository(&self.config.github_url)?;
+            Ok(removed_files.len())
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Cleanup old cache entries
+    pub fn cleanup_old_cache(&mut self, max_age_days: u64) -> Result<usize> {
+        if let Some(ref mut cache) = self.cache {
+            cache.cleanup_old_entries(max_age_days)
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Clear entire cache
+    pub fn clear_all_cache(&mut self) -> Result<usize> {
+        if let Some(ref mut cache) = self.cache {
+            cache.clear_all()
+        } else {
+            Ok(0)
+        }
     }
     
     /// Get analysis statistics
