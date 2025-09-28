@@ -19,6 +19,11 @@ interface TreeNodeItemProps {
 export const TreeView: React.FC<TreeViewProps> = ({ nodes, rootId, onCheckboxChange }) => {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set([rootId]));
 
+  // Debug logging
+  React.useEffect(() => {
+    console.log('🌳 TreeView mounted with nodes:', nodes.size, 'rootId:', rootId);
+  }, [nodes, rootId]);
+
   const handleToggleExpansion = useCallback((nodeId: string) => {
     setExpandedNodes(prev => {
       const newSet = new Set(prev);
@@ -37,9 +42,8 @@ export const TreeView: React.FC<TreeViewProps> = ({ nodes, rootId, onCheckboxCha
 
 
   return (
-    <div className="tree-view">
-      <h3 className="tree-title">Project Structure</h3>
-      <div className="tree-content">
+    <div className="tree-view" style={{ height: '100%', overflow: 'hidden' }}>
+      <div className="tree-content" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden' }}>
         <TreeNodeRenderer
           nodeId={rootId}
           nodes={nodes}
@@ -172,22 +176,42 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
     >
       <div className="tree-node-content">
         {/* Expander for folders with children */}
-        <button
+        <span
           className={`tree-expander ${hasChildren ? 'has-children' : 'no-children'}`}
           onClick={handleExpanderClick}
-          disabled={!hasChildren}
+          style={{
+            cursor: hasChildren ? 'pointer' : 'default',
+            userSelect: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '16px',
+            height: '16px',
+            fontSize: '10px',
+            color: '#64748b'
+          }}
         >
           {hasChildren ? (expandedNodes.has(node.id) ? '▼' : '▶') : '○'}
-        </button>
+        </span>
 
         {/* Checkbox */}
-        <button
+        <span
           className={`tree-checkbox ${node.type}-checkbox checkbox-${node.checkboxState}`}
           onClick={handleCheckboxClick}
           title={getCheckboxTitle(node)}
+          style={{
+            cursor: 'pointer',
+            userSelect: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '18px',
+            height: '18px',
+            fontSize: '14px'
+          }}
         >
           {getCheckboxSymbol(node.checkboxState, node.type)}
-        </button>
+        </span>
 
         {/* Node icon */}
         <span className={`tree-icon ${node.type}-icon`}>
@@ -248,8 +272,8 @@ export const treeViewStyles = `
   padding: 16px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
-  max-height: 600px;
-  overflow-y: auto;
+  height: 100%;
+  overflow: hidden;
 }
 
 .tree-title {
@@ -296,20 +320,36 @@ export const treeViewStyles = `
 }
 
 .tree-expander {
-  background: none;
-  border: none;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
   font-size: 10px;
   cursor: pointer;
-  padding: 2px;
+  padding: 0 !important;
+  margin: 0 !important;
   min-width: 16px;
+  width: 16px;
+  height: 16px;
   color: #64748b;
   display: flex;
   align-items: center;
   justify-content: center;
+  outline: none !important;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
 }
 
 .tree-expander:hover:not(:disabled) {
   color: #334155;
+  background: transparent !important;
+  border: none !important;
+}
+
+.tree-expander:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .tree-expander:disabled {
@@ -319,24 +359,40 @@ export const treeViewStyles = `
 
 .tree-expander.no-children {
   cursor: default;
+  visibility: hidden;
 }
 
 .tree-checkbox {
-  background: none;
-  border: none;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
   font-size: 14px;
   cursor: pointer;
-  padding: 2px;
+  padding: 0 !important;
+  margin: 0 !important;
   min-width: 18px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 2px;
-  transition: background-color 0.15s ease;
+  outline: none !important;
+  transition: color 0.15s ease;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
 }
 
 .tree-checkbox:hover {
-  background-color: #e2e8f0;
+  transform: scale(1.1);
+  background: transparent !important;
+  border: none !important;
+}
+
+.tree-checkbox:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .folder-checkbox.checkbox-checked {

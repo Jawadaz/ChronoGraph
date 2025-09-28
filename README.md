@@ -14,8 +14,20 @@ React + TypeScript frontend for ChronoGraph dependency analysis tool.
 - **Tree Transforms (`src/utils/treeBasedGraphTransforms.ts`)**: Converts dependency data to Cytoscape graph elements
 - **Tree Visualization (`src/components/TreeBasedCytoscapeGraph.tsx`)**: Interactive tree-based dependency graph
 
-### Latest Features (Analysis Caching & UI)
-Major improvements to performance and user interface:
+### Latest Features (UI/UX & Testing)
+Major improvements to user interface and automated testing:
+
+1. **Scroll Bar Elimination**: Complete fix for all unwanted inner and outer scroll bars
+2. **Layout Constraints**: Proper viewport height management preventing content overflow
+3. **Document-Level Fixes**: Global CSS reset preventing page-level scrolling issues
+4. **Playwright Testing Suite**: Comprehensive UI regression testing with real-time feedback
+5. **Visual Regression Testing**: Screenshot comparison for layout consistency verification
+6. **Automated UI Detection**: Tests that automatically detect scroll bar and layout issues
+7. **Watch Mode Testing**: Real-time test feedback during development
+8. **CI/CD Ready**: Test configuration optimized for continuous integration
+
+### Previous Features (Analysis Caching & Controls)
+Performance and interface improvements:
 
 1. **Analysis Result Caching**: 85-95% performance improvement through intelligent caching of analysis results
 2. **Cache Management UI**: Professional dual-tab interface with repository and analysis cache controls
@@ -27,9 +39,9 @@ Major improvements to performance and user interface:
 8. **Tree-Based View Foundation**: Robust path normalization, state propagation, and node optimization for future enhancements
 
 ### Test Coverage
-**Frontend Tests**:
+**Unit Tests (Jest)**:
 ```bash
-# Run all frontend tests
+# Run all unit tests
 npm test
 
 # Run tree structure tests
@@ -37,6 +49,24 @@ npm test -- --testNamePattern="TreeStructure"
 
 # Run tree transform tests
 npm test -- --testNamePattern="TreeBasedGraphTransforms"
+```
+
+**UI Tests (Playwright)**:
+```bash
+# Run all UI tests
+npm run test:ui
+
+# Run web-only tests
+npm run test:ui:web
+
+# Run with visible browser for debugging
+npm run test:ui:headed
+
+# Watch mode for real-time feedback
+npm run test:ui:watch
+
+# View test results
+npm run test:ui:report
 ```
 
 **Backend Tests** (from `src-tauri/`):

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { RepositoryInput, AnalysisProgress, AnalysisResults, RepositoryManager } from './components'
+import { RepositorySelectionModal, AnalysisProgress, AnalysisResults, RepositoryManager } from './components'
 
 // Check if we're running in Tauri or in web browser
 const isTauri = () => {
@@ -16,6 +16,7 @@ function App() {
   const [showLogs, setShowLogs] = useState(false)
   const [analysisLogs, setAnalysisLogs] = useState([])
   const [showRepositoryManager, setShowRepositoryManager] = useState(false)
+  const [showRepositoryModal, setShowRepositoryModal] = useState(false)
   const [isWebVersion, setIsWebVersion] = useState(!isTauri())
 
   // Poll for progress updates during analysis (Tauri only)
@@ -224,15 +225,24 @@ function App() {
               </p>
             )}
           </div>
-          {!isWebVersion && (
+          <div className="header-buttons">
             <button
-              onClick={() => setShowRepositoryManager(true)}
-              className="repo-manager-button"
-              title="Manage cached repositories"
+              onClick={() => setShowRepositoryModal(true)}
+              className="repo-modal-button"
+              title="Open repository for analysis"
             >
-              🗂️ Cache Manager
+              📂 Open Repository
             </button>
-          )}
+            {!isWebVersion && (
+              <button
+                onClick={() => setShowRepositoryManager(true)}
+                className="repo-manager-button"
+                title="Manage cached repositories"
+              >
+                🗂️ Cache Manager
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -243,11 +253,6 @@ function App() {
             <button onClick={() => setError('')}>Dismiss</button>
           </div>
         )}
-
-        <RepositoryInput 
-          onAnalysisStart={handleAnalysisStart}
-          isAnalyzing={isAnalyzing}
-        />
 
         {isAnalyzing && (
           <div>
@@ -275,12 +280,41 @@ function App() {
         )}
         
         {!isAnalyzing && snapshots.length > 0 && (
-          <AnalysisResults 
-            snapshots={snapshots} 
+          <AnalysisResults
+            snapshots={snapshots}
             statistics={statistics}
           />
         )}
       </main>
+
+      {/* Status Bar */}
+      {!isAnalyzing && snapshots.length > 0 && (
+        <div className="status-bar">
+          <div className="status-left">
+            <span className="status-item">
+              📊 Commit: {snapshots[0]?.commit_info?.hash?.substring(0, 8) || 'Unknown'}
+            </span>
+            <span className="status-item">
+              📁 {snapshots[0]?.analysis_result?.analyzed_files?.length || 0} files
+            </span>
+            <span className="status-item">
+              🔗 {snapshots[0]?.analysis_result?.dependencies?.length || 0} dependencies
+            </span>
+          </div>
+          <div className="status-right">
+            <span className="status-item">
+              ⏱️ {Math.round((snapshots[0]?.analysis_result?.metrics?.analysis_duration_ms || 0) / 1000)}s
+            </span>
+          </div>
+        </div>
+      )}
+
+      <RepositorySelectionModal
+        isVisible={showRepositoryModal}
+        onClose={() => setShowRepositoryModal(false)}
+        onAnalysisStart={handleAnalysisStart}
+        isAnalyzing={isAnalyzing}
+      />
 
       {!isWebVersion && (
         <RepositoryManager
@@ -291,49 +325,63 @@ function App() {
 
       <style jsx>{`
         .app {
-          min-height: 100vh;
+          height: 100vh;
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          padding: 20px;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
         }
 
         .app-header {
           color: white;
-          margin-bottom: 30px;
+          flex-shrink: 0;
+          padding: 10px 2vw;
+          margin-bottom: 0;
         }
 
         .header-content {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          max-width: 1000px;
+          width: 95%;
+          max-width: 1400px;
           margin: 0 auto;
         }
 
+        .header-buttons {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+        }
+
         .app-header h1 {
-          font-size: 3em;
-          margin: 0 0 10px 0;
+          font-size: 2em;
+          margin: 0 0 5px 0;
           text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
         }
 
         .app-header p {
-          font-size: 1.2em;
+          font-size: 0.9em;
           opacity: 0.9;
           margin: 0;
         }
 
+        .repo-modal-button,
         .repo-manager-button {
           background: rgba(255, 255, 255, 0.2);
           border: 2px solid rgba(255, 255, 255, 0.3);
           color: white;
-          padding: 12px 20px;
-          border-radius: 8px;
+          padding: 8px 16px;
+          border-radius: 6px;
           cursor: pointer;
-          font-size: 14px;
+          font-size: 12px;
           font-weight: 500;
           backdrop-filter: blur(10px);
           transition: all 0.3s ease;
+          white-space: nowrap;
         }
 
+        .repo-modal-button:hover,
         .repo-manager-button:hover {
           background: rgba(255, 255, 255, 0.3);
           border-color: rgba(255, 255, 255, 0.5);
@@ -341,13 +389,16 @@ function App() {
         }
 
         .app-main {
-          max-width: 1000px;
-          margin: 0 auto;
+          flex: 1;
+          width: 100%;
+          margin: 0;
           background: rgba(255, 255, 255, 0.95);
-          border-radius: 16px;
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-          backdrop-filter: blur(10px);
-          padding: 30px;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          overflow: hidden;
+          height: calc(100vh - 90px);
         }
 
         .error-message {
@@ -392,6 +443,52 @@ function App() {
           opacity: 0.8;
           margin-top: 8px;
           font-style: italic;
+        }
+
+        .status-bar {
+          height: 24px;
+          background: #007acc;
+          color: white;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 0 16px;
+          font-size: 12px;
+          font-family: 'Consolas', 'Courier New', monospace;
+          border-top: 1px solid #005a9e;
+          flex-shrink: 0;
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          z-index: 1000;
+        }
+
+        .status-left {
+          display: flex;
+          gap: 16px;
+          align-items: center;
+        }
+
+        .status-right {
+          display: flex;
+          gap: 16px;
+          align-items: center;
+        }
+
+        .status-item {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          color: rgba(255, 255, 255, 0.9);
+        }
+
+        .status-item:hover {
+          color: white;
+          background: rgba(255, 255, 255, 0.1);
+          padding: 2px 6px;
+          border-radius: 3px;
+          cursor: default;
         }
 
         @media (max-width: 768px) {

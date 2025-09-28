@@ -111,6 +111,56 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       });
     });
 
+    // Hover effects for nodes
+    cy.on('mouseover', 'node', (event) => {
+      const node = event.target;
+      const nodeId = node.id();
+
+      // Reset all elements first
+      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
+
+      // Get connected edges
+      const connectedEdges = node.connectedEdges();
+      const incomingEdges = connectedEdges.filter(edge => edge.target().id() === nodeId);
+      const outgoingEdges = connectedEdges.filter(edge => edge.source().id() === nodeId);
+
+      // Highlight incoming connections (dependencies on this node)
+      incomingEdges.addClass('highlighted-incoming');
+      incomingEdges.sources().addClass('highlighted-source');
+
+      // Highlight outgoing connections (this node depends on)
+      outgoingEdges.addClass('highlighted-outgoing');
+      outgoingEdges.targets().addClass('highlighted-target');
+
+      // Highlight the hovered node itself
+      node.addClass('highlighted-hover');
+    });
+
+    cy.on('mouseout', 'node', (event) => {
+      // Remove all highlighting
+      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
+    });
+
+    // Hover effects for edges
+    cy.on('mouseover', 'edge', (event) => {
+      const edge = event.target;
+
+      // Reset all elements first
+      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
+
+      // Highlight the edge itself
+      edge.addClass('highlighted-hover');
+
+      // Highlight source and target nodes
+      edge.source().addClass('highlighted-source');
+      edge.target().addClass('highlighted-target');
+    });
+
+    cy.on('mouseout', 'edge', (event) => {
+      // Remove all highlighting
+      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
+    });
+
     // Cleanup
     return () => {
       if (cyRef.current) {
@@ -241,7 +291,7 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
           className="cytoscape-graph"
           style={{
             width: '100%',
-            height: '600px',
+            height: '100%',
             border: '1px solid #e2e8f0',
             borderRadius: '8px',
             background: '#ffffff'
@@ -285,7 +335,9 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
           display: flex;
           gap: 20px;
           width: 100%;
-          height: 600px;
+          height: 100%;
+          flex: 1;
+          min-height: 0;
         }
 
         .tree-based-cytoscape-container.settings-collapsed {
@@ -301,7 +353,7 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
         .settings-sidebar {
           width: 350px;
           flex-shrink: 0;
-          height: 600px;
+          height: 100%;
           display: flex;
           flex-direction: column;
           background: #f8fafc;
@@ -564,6 +616,167 @@ const getTreeBasedCytoscapeStyles = (
         }
         // Fallback to original logic if no weight range provided
         return Math.max(3, Math.min(8, weight + 1));
+      }
+    }
+  },
+
+  // Hover highlighting styles
+
+  // Highlighted incoming edges (dependencies pointing TO the hovered node)
+  {
+    selector: 'edge.highlighted-incoming',
+    style: {
+      'line-color': '#ef4444', // Red for incoming
+      'target-arrow-color': '#ef4444',
+      'width': (ele: any) => {
+        const weight = ele.data('weight');
+        if (weightRange && weightRange.min !== undefined && weightRange.max !== undefined) {
+          return calculateDynamicWidth(weight, weightRange.min, weightRange.max, true);
+        }
+        return Math.max(3, Math.min(8, weight + 1));
+      },
+      'z-index': 10
+    }
+  },
+
+  // Highlighted outgoing edges (dependencies FROM the hovered node)
+  {
+    selector: 'edge.highlighted-outgoing',
+    style: {
+      'line-color': '#22c55e', // Green for outgoing
+      'target-arrow-color': '#22c55e',
+      'width': (ele: any) => {
+        const weight = ele.data('weight');
+        if (weightRange && weightRange.min !== undefined && weightRange.max !== undefined) {
+          return calculateDynamicWidth(weight, weightRange.min, weightRange.max, true);
+        }
+        return Math.max(3, Math.min(8, weight + 1));
+      },
+      'z-index': 10
+    }
+  },
+
+  // Source nodes (where highlighted edges come from)
+  {
+    selector: 'node.highlighted-source',
+    style: {
+      'border-color': '#ef4444', // Red border for source nodes
+      'border-width': '4px',
+      'border-opacity': 0.8,
+      'overlay-opacity': 0.1,
+      'overlay-color': '#ef4444',
+      'z-index': 5
+    }
+  },
+
+  // Target nodes (where highlighted edges go to)
+  {
+    selector: 'node.highlighted-target',
+    style: {
+      'border-color': '#22c55e', // Green border for target nodes
+      'border-width': '4px',
+      'border-opacity': 0.8,
+      'overlay-opacity': 0.1,
+      'overlay-color': '#22c55e',
+      'z-index': 5
+    }
+  },
+
+  // Hovered element itself
+  {
+    selector: '.highlighted-hover',
+    style: {
+      'border-color': '#3b82f6', // Blue for the hovered element
+      'border-width': '5px',
+      'overlay-opacity': 0.2,
+      'overlay-color': '#3b82f6',
+      'z-index': 15
+    }
+  },
+
+  // Dim non-highlighted elements during hover (excluding compound nodes)
+  {
+    selector: 'node:unselected:simple',  // Only simple nodes, not compound nodes
+    style: {
+      'opacity': (ele: any) => {
+        // Check if any highlighting is active
+        const hasHighlighted = ele.cy().elements('.highlighted-incoming, .highlighted-outgoing, .highlighted-source, .highlighted-target, .highlighted-hover').length > 0;
+        if (hasHighlighted) {
+          // If this element is highlighted, keep it visible
+          const isHighlighted = ele.hasClass('highlighted-incoming') ||
+                               ele.hasClass('highlighted-outgoing') ||
+                               ele.hasClass('highlighted-source') ||
+                               ele.hasClass('highlighted-target') ||
+                               ele.hasClass('highlighted-hover');
+
+          if (isHighlighted) {
+            return 1;
+          }
+
+          // Don't dim children of hovered compound nodes (expanded folders)
+          const hoveredCompoundNodes = ele.cy().elements('node.highlighted-hover:parent');
+          if (hoveredCompoundNodes.length > 0) {
+            // Check if this element is a descendant of any hovered compound node
+            for (let i = 0; i < hoveredCompoundNodes.length; i++) {
+              const compoundNode = hoveredCompoundNodes[i];
+              if (ele.isChild() && ele.ancestors().includes(compoundNode)) {
+                return 1; // Keep children of hovered expanded folders at full opacity
+              }
+            }
+          }
+
+          return 0.3; // Dim other simple nodes only
+        }
+        return 1;
+      }
+    }
+  },
+
+  // Keep compound nodes (expanded containers) always visible
+  {
+    selector: 'node:parent',
+    style: {
+      'opacity': 1  // Never dim expanded containers
+    }
+  },
+
+  {
+    selector: 'edge:unselected',
+    style: {
+      'opacity': (ele: any) => {
+        // Check if any highlighting is active
+        const hasHighlighted = ele.cy().elements('.highlighted-incoming, .highlighted-outgoing, .highlighted-source, .highlighted-target, .highlighted-hover').length > 0;
+        if (hasHighlighted) {
+          // If this element is highlighted, keep it visible
+          const isHighlighted = ele.hasClass('highlighted-incoming') ||
+                               ele.hasClass('highlighted-outgoing') ||
+                               ele.hasClass('highlighted-hover');
+
+          if (isHighlighted) {
+            return 1;
+          }
+
+          // Don't dim edges between children of hovered compound nodes
+          const hoveredCompoundNodes = ele.cy().elements('node.highlighted-hover:parent');
+          if (hoveredCompoundNodes.length > 0) {
+            const source = ele.source();
+            const target = ele.target();
+
+            for (let i = 0; i < hoveredCompoundNodes.length; i++) {
+              const compoundNode = hoveredCompoundNodes[i];
+              // Check if both source and target are children of the hovered compound node
+              const sourceIsChild = source.isChild() && source.ancestors().includes(compoundNode);
+              const targetIsChild = target.isChild() && target.ancestors().includes(compoundNode);
+
+              if (sourceIsChild && targetIsChild) {
+                return 1; // Keep internal edges of hovered expanded folders at full opacity
+              }
+            }
+          }
+
+          return 0.2; // Dim other edges
+        }
+        return 1;
       }
     }
   }

@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
-// Removed DependencyGraph and CytoscapeGraph - keeping only tree-based visualization
-import { TreeView, treeViewStyles } from './TreeView';
-import { TreeBasedCytoscapeGraph } from './TreeBasedCytoscapeGraph';
-import { buildProjectTreeFromLakos, updateCheckboxState, CheckboxState, TreeNode } from '../utils/treeStructure';
-import { transformToTreeBasedGraphElements } from '../utils/treeBasedGraphTransforms';
+import React from 'react';
+import { TimelineTab } from './TimelineTab';
+import { StatisticsTab } from './StatisticsTab';
+import { DependenciesTab } from './DependenciesTab';
+import { GraphTab } from './GraphTab';
+import { buildProjectTreeFromLakos, updateCheckboxState } from '../utils/treeStructure';
 
 interface Dependency {
   source_file: string;
   target_file: string;
   relationship_type: string;
-  weight: any;
+  weight: number;
 }
 
 interface CommitInfo {
@@ -20,1127 +20,259 @@ interface CommitInfo {
 }
 
 interface CommitSnapshot {
+  commit_hash: string;
+  timestamp: number;
   commit_info: CommitInfo;
+  dependencies: Dependency[];
   analysis_result: {
-    dependencies: Dependency[];
     analyzed_files: string[];
+    dependencies: Dependency[];
     metrics: {
-      total_files_found: number;
-      files_analyzed: number;
-      dependencies_found: number;
       analysis_duration_ms: number;
+      total_files: number;
+      total_dependencies: number;
     };
   };
 }
 
+interface Statistics {
+  total_snapshots: number;
+  total_dependencies: number;
+  total_files_analyzed: number;
+  time_span_seconds: number;
+  authors?: Array<{
+    name: string;
+    commits: number;
+    color?: string;
+  }>;
+}
+
+interface EdgeFilter {
+  sourceId: string;
+  targetId: string;
+  relationshipTypes: string[];
+}
+
+interface TreeNode {
+  id: string;
+  label: string;
+  fullPath: string;
+  type: 'folder' | 'file';
+  parent?: string;
+  children: string[];
+  checkboxState: 'checked' | 'unchecked' | 'half-checked';
+  isExpanded?: boolean;
+}
+
 interface AnalysisResultsProps {
   snapshots: CommitSnapshot[];
-  statistics: {
-    total_snapshots: number;
-    total_dependencies: number;
-    total_files_analyzed: number;
-    time_span_seconds: number;
-    first_commit_hash: string;
-    last_commit_hash: string;
-    author_commit_counts: Record<string, number>;
-  } | null;
+  statistics: Statistics | null;
 }
 
 export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, statistics }) => {
-  const [selectedCommit, setSelectedCommit] = React.useState<CommitSnapshot | null>(null);
-  const [viewMode, setViewMode] = React.useState<'timeline' | 'statistics' | 'dependencies' | 'graph'>('timeline');
+  // Tab state
+  const [activeTab, setActiveTab] = React.useState<'timeline' | 'statistics' | 'dependencies' | 'graph'>('graph');
 
-  // Dependencies view state
+  // Selected commit state
+  const [selectedCommit, setSelectedCommit] = React.useState<CommitSnapshot | null>(snapshots[0] || null);
+
+  // Dependencies tab state
   const [dependencyFilter, setDependencyFilter] = React.useState('');
   const [dependencySort, setDependencySort] = React.useState<'source' | 'target' | 'type'>('source');
-  const [dependencyLimit, setDependencyLimit] = React.useState(100);
   const [showAllDeps, setShowAllDeps] = React.useState(false);
+  const [dependencyLimit, setDependencyLimit] = React.useState(50);
+  const [edgeFilter, setEdgeFilter] = React.useState<EdgeFilter | null>(null);
 
-  // Edge filter state
-  const [edgeFilter, setEdgeFilter] = React.useState<{
-    sourceId: string;
-    targetId: string;
-    relationshipTypes: string[];
-  } | null>(null);
-
-  // Graph view state (simplified to only tree-based)
+  // Graph tab state
   const [selectedGraphNode, setSelectedGraphNode] = React.useState<string | null>(null);
+  const [isTreePanelCollapsed, setIsTreePanelCollapsed] = React.useState(false);
+  const [treeNodes, setTreeNodes] = React.useState<Map<string, TreeNode>>(new Map());
+  const [treeRootId, setTreeRootId] = React.useState<string | null>(null);
 
-  // Tree-based graph state
-  const [treeNodes, setTreeNodes] = useState<Map<string, TreeNode>>(new Map());
-  const [treeRootId, setTreeRootId] = useState<string>('');
-  const [isTreePanelCollapsed, setIsTreePanelCollapsed] = useState(false);
+  // Build tree from dependencies when selected commit changes
+  React.useEffect(() => {
+    if (!selectedCommit) return;
+
+    const projectTree = buildProjectTreeFromLakos(selectedCommit.analysis_result.dependencies);
+
+    setTreeNodes(projectTree.nodes);
+    setTreeRootId(projectTree.rootId);
+  }, [selectedCommit]);
+
+  // Handle tree node checkbox changes
+  const handleTreeCheckboxChange = (nodeId: string, newState: 'checked' | 'unchecked' | 'half-checked') => {
+    const updatedNodes = updateCheckboxState(nodeId, newState, treeNodes);
+    setTreeNodes(updatedNodes);
+  };
+
+  // Handle edge double-click for filtering
+  const handleEdgeDoubleClick = (sourceId: string, targetId: string, relationshipTypes: string[]) => {
+    setEdgeFilter({ sourceId, targetId, relationshipTypes });
+    setActiveTab('dependencies');
+  };
 
   if (snapshots.length === 0) {
     return (
-      <div className="no-results">
+      <div className="analysis-results-empty">
         <h3>📊 No Analysis Results Yet</h3>
         <p>Start an analysis to see temporal dependency data here.</p>
       </div>
     );
   }
 
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleDateString();
-  };
-
-  const formatDuration = (ms: number) => {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${(ms / 60000).toFixed(1)}m`;
-  };
-
-  // Handle edge double-click from graph
-  const handleEdgeDoubleClick = (sourceId: string, targetId: string, relationshipTypes: string[]) => {
-    setEdgeFilter({ sourceId, targetId, relationshipTypes });
-    setViewMode('dependencies');
-  };
-
-  // Build tree when commit changes
-  React.useEffect(() => {
-    console.log('🔍 Tree useEffect triggered:', {
-      hasSelectedCommit: !!selectedCommit,
-      dependenciesCount: selectedCommit?.analysis_result.dependencies.length || 0
-    });
-
-    if (selectedCommit) {
-      console.log('🌲 Building tree for data...');
-      const projectTree = buildProjectTreeFromLakos(selectedCommit.analysis_result.dependencies);
-      setTreeNodes(projectTree.nodes);
-      setTreeRootId(projectTree.rootId);
-
-      console.log('🌳 Built project tree:', {
-        rootId: projectTree.rootId,
-        totalNodes: projectTree.nodes.size,
-        sampleNodes: Array.from(projectTree.nodes.keys()).slice(0, 5)
-      });
-    }
-  }, [selectedCommit]);
-
-  // Handle tree checkbox changes
-  const handleTreeCheckboxChange = (nodeId: string, newState: CheckboxState) => {
-    const updatedNodes = updateCheckboxState(nodeId, newState, treeNodes);
-    setTreeNodes(updatedNodes);
-
-    console.log('🔄 Tree checkbox changed:', {
-      nodeId,
-      newState,
-      updatedNodesCount: updatedNodes.size
-    });
-  };
-
-  // Helper functions for dependency management
-  const getFilteredDependencies = (dependencies: Dependency[]) => {
-    let filtered = dependencies;
-
-    // Apply text filter
-    if (dependencyFilter.trim()) {
-      const filter = dependencyFilter.toLowerCase();
-      filtered = filtered.filter(dep =>
-        dep.source_file.toLowerCase().includes(filter) ||
-        dep.target_file.toLowerCase().includes(filter) ||
-        dep.relationship_type.toLowerCase().includes(filter)
-      );
-    }
-
-    // Apply edge filter from graph double-click
-    if (edgeFilter) {
-      filtered = filtered.filter(dep => {
-        const sourceMatch = dep.source_file.includes(edgeFilter.sourceId) ||
-                           edgeFilter.sourceId.includes(dep.source_file) ||
-                           dep.source_file === edgeFilter.sourceId;
-        const targetMatch = dep.target_file.includes(edgeFilter.targetId) ||
-                           edgeFilter.targetId.includes(dep.target_file) ||
-                           dep.target_file === edgeFilter.targetId;
-        const typeMatch = edgeFilter.relationshipTypes.includes(dep.relationship_type);
-
-        return sourceMatch && targetMatch && typeMatch;
-      });
-    }
-
-    // Apply sorting
-    filtered.sort((a, b) => {
-      switch (dependencySort) {
-        case 'source':
-          return a.source_file.localeCompare(b.source_file);
-        case 'target':
-          return a.target_file.localeCompare(b.target_file);
-        case 'type':
-          return a.relationship_type.localeCompare(b.relationship_type);
-        default:
-          return 0;
-      }
-    });
-
-    // Apply display limit
-    const limit = showAllDeps ? filtered.length : dependencyLimit;
-    return {
-      displayed: filtered.slice(0, limit),
-      total: filtered.length,
-      hasMore: filtered.length > limit
-    };
-  };
-
   return (
     <div className="analysis-results">
       <div className="results-header">
         <h2>📈 Analysis Results</h2>
-        <div className="view-controls">
-          <button 
-            className={viewMode === 'timeline' ? 'active' : ''}
-            onClick={() => setViewMode('timeline')}
+        <div className="tab-navigation">
+          <button
+            className={`tab ${activeTab === 'graph' ? 'active' : ''}`}
+            onClick={() => setActiveTab('graph')}
+          >
+            🔗 Graph
+          </button>
+          <button
+            className={`tab ${activeTab === 'timeline' ? 'active' : ''}`}
+            onClick={() => setActiveTab('timeline')}
           >
             📅 Timeline
           </button>
-          <button 
-            className={viewMode === 'statistics' ? 'active' : ''}
-            onClick={() => setViewMode('statistics')}
+          <button
+            className={`tab ${activeTab === 'statistics' ? 'active' : ''}`}
+            onClick={() => setActiveTab('statistics')}
           >
             📊 Statistics
           </button>
           <button
-            className={viewMode === 'dependencies' ? 'active' : ''}
-            onClick={() => setViewMode('dependencies')}
+            className={`tab ${activeTab === 'dependencies' ? 'active' : ''}`}
+            onClick={() => setActiveTab('dependencies')}
           >
             🔗 Dependencies
-          </button>
-          <button
-            className={viewMode === 'graph' ? 'active' : ''}
-            onClick={() => setViewMode('graph')}
-          >
-            📊 Graph
           </button>
         </div>
       </div>
 
-      {viewMode === 'timeline' && (
-        <div className="timeline-view">
-          <h3>🕐 Commit Timeline ({snapshots.length} snapshots)</h3>
-          <div className="commits-list">
-            {snapshots.map((snapshot, index) => (
-              <div 
-                key={snapshot.commit_info.hash}
-                className={`commit-item ${selectedCommit?.commit_info.hash === snapshot.commit_info.hash ? 'selected' : ''}`}
-                onClick={() => setSelectedCommit(selectedCommit?.commit_info.hash === snapshot.commit_info.hash ? null : snapshot)}
-              >
-                <div className="commit-header">
-                  <span className="commit-hash">
-                    {snapshot.commit_info.hash.substring(0, 8)}
-                  </span>
-                  <span className="commit-author">
-                    👤 {snapshot.commit_info.author_name}
-                  </span>
-                  <span className="commit-date">
-                    📅 {formatDate(snapshot.commit_info.timestamp)}
-                  </span>
-                </div>
-                <div className="commit-message">
-                  {snapshot.commit_info.message.split('\n')[0]}
-                </div>
-                <div className="commit-stats">
-                  📁 {snapshot.analysis_result.analyzed_files.length} files • 
-                  🔗 {snapshot.analysis_result.dependencies.length} dependencies • 
-                  ⏱️ {formatDuration(snapshot.analysis_result.metrics.analysis_duration_ms)}
-                </div>
-              </div>
-            ))}
-          </div>
+      <div className="tab-content">
+        {activeTab === 'timeline' && (
+          <TimelineTab
+            snapshots={snapshots}
+            selectedCommit={selectedCommit}
+            onCommitSelect={setSelectedCommit}
+          />
+        )}
 
-          {selectedCommit && (
-            <div className="commit-details">
-              <h4>📋 Commit Details</h4>
-              <div className="detail-grid">
-                <div className="detail-item">
-                  <strong>Hash:</strong> <code>{selectedCommit.commit_info.hash}</code>
-                </div>
-                <div className="detail-item">
-                  <strong>Author:</strong> {selectedCommit.commit_info.author_name}
-                </div>
-                <div className="detail-item">
-                  <strong>Date:</strong> {formatDate(selectedCommit.commit_info.timestamp)}
-                </div>
-                <div className="detail-item">
-                  <strong>Files Analyzed:</strong> {selectedCommit.analysis_result.analyzed_files.length}
-                </div>
-                <div className="detail-item">
-                  <strong>Dependencies:</strong> {selectedCommit.analysis_result.dependencies.length}
-                </div>
-                <div className="detail-item">
-                  <strong>Analysis Time:</strong> {formatDuration(selectedCommit.analysis_result.metrics.analysis_duration_ms)}
-                </div>
-              </div>
-              <div className="commit-message-full">
-                <strong>Message:</strong>
-                <pre>{selectedCommit.commit_info.message}</pre>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+        {activeTab === 'statistics' && statistics && (
+          <StatisticsTab statistics={statistics} />
+        )}
 
-      {viewMode === 'statistics' && statistics && (
-        <div className="statistics-view">
-          <h3>📊 Analysis Statistics</h3>
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-number">{statistics.total_snapshots}</div>
-              <div className="stat-label">Commits Analyzed</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-number">{statistics.total_dependencies}</div>
-              <div className="stat-label">Total Dependencies</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-number">{statistics.total_files_analyzed}</div>
-              <div className="stat-label">Files Analyzed</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-number">{Math.round(statistics.time_span_seconds / 86400)}</div>
-              <div className="stat-label">Days Covered</div>
-            </div>
-          </div>
+        {activeTab === 'dependencies' && selectedCommit && (
+          <DependenciesTab
+            selectedCommit={selectedCommit}
+            dependencyFilter={dependencyFilter}
+            setDependencyFilter={setDependencyFilter}
+            dependencySort={dependencySort}
+            setDependencySort={setDependencySort}
+            showAllDeps={showAllDeps}
+            setShowAllDeps={setShowAllDeps}
+            dependencyLimit={dependencyLimit}
+            setDependencyLimit={setDependencyLimit}
+            edgeFilter={edgeFilter}
+            setEdgeFilter={setEdgeFilter}
+          />
+        )}
 
-          <div className="authors-section">
-            <h4>👥 Author Contributions</h4>
-            <div className="authors-list">
-              {Object.entries(statistics.author_commit_counts)
-                .sort(([,a], [,b]) => b - a)
-                .map(([author, count]) => (
-                  <div key={author} className="author-item">
-                    <span className="author-name">{author}</span>
-                    <span className="author-count">{count} commits</span>
-                    <div className="author-bar">
-                      <div 
-                        className="author-bar-fill"
-                        style={{ 
-                          width: `${(count / Math.max(...Object.values(statistics.author_commit_counts))) * 100}%` 
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {viewMode === 'dependencies' && selectedCommit && (() => {
-        const depData = getFilteredDependencies(selectedCommit.analysis_result.dependencies);
-        return (
-          <div className="dependencies-view">
-            <h3>🔗 Dependencies for Commit {selectedCommit.commit_info.hash.substring(0, 8)}</h3>
-
-            {/* Controls */}
-            <div className="dependencies-controls">
-              <div className="control-group">
-                <input
-                  type="text"
-                  placeholder="Filter dependencies..."
-                  value={dependencyFilter}
-                  onChange={(e) => setDependencyFilter(e.target.value)}
-                  className="filter-input"
-                />
-              </div>
-
-              <div className="control-group">
-                <label>Sort by:</label>
-                <select
-                  value={dependencySort}
-                  onChange={(e) => setDependencySort(e.target.value as 'source' | 'target' | 'type')}
-                  className="sort-select"
-                >
-                  <option value="source">Source File</option>
-                  <option value="target">Target File</option>
-                  <option value="type">Relationship Type</option>
-                </select>
-              </div>
-
-              <div className="control-group">
-                <label>Show:</label>
-                <select
-                  value={showAllDeps ? 'all' : dependencyLimit.toString()}
-                  onChange={(e) => {
-                    if (e.target.value === 'all') {
-                      setShowAllDeps(true);
-                    } else {
-                      setShowAllDeps(false);
-                      setDependencyLimit(parseInt(e.target.value));
-                    }
-                  }}
-                  className="limit-select"
-                >
-                  <option value="25">First 25</option>
-                  <option value="50">First 50</option>
-                  <option value="100">First 100</option>
-                  <option value="250">First 250</option>
-                  <option value="all">All ({depData.total})</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Edge Filter Display - Compact */}
-            {edgeFilter && (
-              <div className="edge-filter-compact">
-                <span className="filter-badge">
-                  🔍 {edgeFilter.sourceId.split('/').pop()} → {edgeFilter.targetId.split('/').pop()}
-                  <span className="filter-type-badge">({edgeFilter.relationshipTypes.join(', ')})</span>
-                </span>
-                <button
-                  className="clear-filter-compact"
-                  onClick={() => setEdgeFilter(null)}
-                  title="Clear filter"
-                >
-                  ×
-                </button>
-              </div>
-            )}
-
-            {/* Stats */}
-            <div className="dependencies-stats">
-              Showing {depData.displayed.length} of {depData.total} dependencies
-              {dependencyFilter && (
-                <span className="filter-indicator"> (filtered)</span>
-              )}
-            </div>
-
-            {/* Dependencies List */}
-            <div className="dependencies-list">
-              {depData.displayed.map((dep, index) => (
-                <div key={index} className="dependency-item">
-                  <div className="dependency-source" title={dep.source_file}>
-                    📄 {dep.source_file.split('/').pop() || dep.source_file}
-                    <div className="dependency-path">{dep.source_file.substring(0, dep.source_file.lastIndexOf('/'))}</div>
-                  </div>
-                  <div className="dependency-arrow">→</div>
-                  <div className="dependency-target" title={dep.target_file}>
-                    📄 {dep.target_file.split('/').pop() || dep.target_file}
-                    <div className="dependency-path">{dep.target_file.substring(0, dep.target_file.lastIndexOf('/'))}</div>
-                  </div>
-                  <div className="dependency-type">
-                    {dep.relationship_type}
-                  </div>
-                </div>
-              ))}
-
-              {depData.hasMore && !showAllDeps && (
-                <div className="more-dependencies">
-                  <button
-                    onClick={() => setShowAllDeps(true)}
-                    className="show-all-btn"
-                  >
-                    Show all {depData.total} dependencies
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Graph View */}
-      {viewMode === 'graph' && selectedCommit && (
-        <div className="graph-view">
-          <div className="graph-header">
-            <h3>📊 Dependency Graph for Commit {selectedCommit.commit_info.hash.substring(0, 8)}</h3>
-
-            <div className="graph-controls">
-              {selectedGraphNode && (
-                <div className="selected-node-info">
-                  <strong>Selected:</strong> {selectedGraphNode.split('/').pop()}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Tree-Based Graph - Full Width with Collapsible Tree */}
-          <div className={`tree-based-graph-container ${isTreePanelCollapsed ? 'tree-collapsed' : ''}`}>
-            {!isTreePanelCollapsed && (
-              <div className="tree-sidebar">
-                <div className="tree-sidebar-header">
-                  <h4>🌳 Project Structure</h4>
-                  <button
-                    onClick={() => setIsTreePanelCollapsed(true)}
-                    className="collapse-button"
-                    title="Hide tree panel"
-                  >
-                    ◄
-                  </button>
-                </div>
-                {treeNodes.size > 0 && treeRootId ? (
-                  <div className="tree-content">
-                    <TreeView
-                      nodes={treeNodes}
-                      rootId={treeRootId}
-                      onCheckboxChange={handleTreeCheckboxChange}
-                    />
-                  </div>
-                ) : (
-                  <div className="tree-loading">
-                    🌳 Building project tree...
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="graph-main">
-              {isTreePanelCollapsed && (
-                <button
-                  onClick={() => setIsTreePanelCollapsed(false)}
-                  className="expand-tree-button"
-                  title="Show tree panel"
-                >
-                  ► Tree
-                </button>
-              )}
-              <TreeBasedCytoscapeGraph
-                dependencies={selectedCommit.analysis_result.dependencies}
-                treeNodes={treeNodes}
-                onNodeSelect={setSelectedGraphNode}
-                onEdgeDoubleClick={handleEdgeDoubleClick}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+        {activeTab === 'graph' && selectedCommit && (
+          <GraphTab
+            selectedCommit={selectedCommit}
+            selectedGraphNode={selectedGraphNode}
+            setSelectedGraphNode={setSelectedGraphNode}
+            isTreePanelCollapsed={isTreePanelCollapsed}
+            setIsTreePanelCollapsed={setIsTreePanelCollapsed}
+            treeNodes={treeNodes}
+            treeRootId={treeRootId}
+            handleTreeCheckboxChange={handleTreeCheckboxChange}
+            handleEdgeDoubleClick={handleEdgeDoubleClick}
+          />
+        )}
+      </div>
 
       <style jsx>{`
         .analysis-results {
-          margin-top: 30px;
-          /* Allow child elements to break out for full width */
-          overflow: visible;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          max-height: 100%;
+          overflow: hidden;
+          height: 100%;
+        }
+
+        .analysis-results-empty {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          padding: 40px;
+          color: #666;
         }
 
         .results-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 20px;
-        }
-
-        .view-controls {
-          display: flex;
-          gap: 10px;
-        }
-
-        .view-controls button {
-          padding: 8px 16px;
-          border: 1px solid #ddd;
-          background: white;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 14px;
-        }
-
-        .view-controls button.active {
-          background: #2563eb;
-          color: white;
-          border-color: #2563eb;
-        }
-
-        .view-controls button:hover:not(.active) {
-          border-color: #2563eb;
-          color: #2563eb;
-        }
-
-        .commits-list {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .commit-item {
-          border: 1px solid #e5e7eb;
-          border-radius: 8px;
-          padding: 16px;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-
-        .commit-item:hover {
-          border-color: #2563eb;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        .commit-item.selected {
-          border-color: #2563eb;
-          background: #eff6ff;
-        }
-
-        .commit-header {
-          display: flex;
-          gap: 16px;
-          align-items: center;
-          margin-bottom: 8px;
-          font-size: 14px;
-        }
-
-        .commit-hash {
-          font-family: monospace;
-          background: #f3f4f6;
-          padding: 2px 6px;
-          border-radius: 4px;
-        }
-
-        .commit-message {
-          font-weight: 500;
-          margin-bottom: 8px;
-          color: #374151;
-        }
-
-        .commit-stats {
-          font-size: 12px;
-          color: #6b7280;
-        }
-
-        .commit-details {
-          margin-top: 20px;
           padding: 20px;
-          border: 1px solid #e5e7eb;
-          border-radius: 8px;
-          background: #f9fafb;
-        }
-
-        .detail-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 12px;
-          margin: 16px 0;
-        }
-
-        .detail-item {
-          font-size: 14px;
-        }
-
-        .commit-message-full pre {
-          background: white;
-          padding: 12px;
-          border-radius: 4px;
-          border: 1px solid #e5e7eb;
-          white-space: pre-wrap;
-          font-size: 13px;
-          margin: 8px 0 0 0;
-        }
-
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-          gap: 16px;
-          margin: 20px 0;
-        }
-
-        .stat-card {
-          background: white;
-          border: 1px solid #e5e7eb;
-          border-radius: 8px;
-          padding: 20px;
-          text-align: center;
-        }
-
-        .stat-number {
-          font-size: 32px;
-          font-weight: bold;
-          color: #2563eb;
-        }
-
-        .stat-label {
-          font-size: 14px;
-          color: #6b7280;
-          margin-top: 4px;
-        }
-
-        .authors-section {
-          margin-top: 30px;
-        }
-
-        .authors-list {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          margin-top: 16px;
-        }
-
-        .author-item {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px;
-          border: 1px solid #e5e7eb;
-          border-radius: 6px;
-        }
-
-        .author-name {
-          min-width: 150px;
-          font-weight: 500;
-        }
-
-        .author-count {
-          min-width: 80px;
-          font-size: 14px;
-          color: #6b7280;
-        }
-
-        .author-bar {
-          flex: 1;
-          height: 6px;
-          background: #e5e7eb;
-          border-radius: 3px;
-          overflow: hidden;
-        }
-
-        .author-bar-fill {
-          height: 100%;
-          background: #2563eb;
-          transition: width 0.3s ease;
-        }
-
-        .dependencies-controls {
-          display: flex;
-          gap: 20px;
-          align-items: center;
-          margin: 16px 0;
-          padding: 16px;
-          background: #f9fafb;
-          border-radius: 8px;
-          border: 1px solid #e5e7eb;
-        }
-
-        .control-group {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .control-group label {
-          font-size: 14px;
-          font-weight: 500;
-          color: #374151;
-          white-space: nowrap;
-        }
-
-        .filter-input {
-          padding: 6px 12px;
-          border: 1px solid #d1d5db;
-          border-radius: 6px;
-          font-size: 14px;
-          width: 200px;
-        }
-
-        .filter-input:focus {
-          outline: none;
-          border-color: #2563eb;
-          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-        }
-
-        .sort-select, .limit-select {
-          padding: 6px 12px;
-          border: 1px solid #d1d5db;
-          border-radius: 6px;
-          font-size: 14px;
-          background: white;
-          cursor: pointer;
-        }
-
-        .sort-select:focus, .limit-select:focus {
-          outline: none;
-          border-color: #2563eb;
-        }
-
-        .dependencies-stats {
-          margin: 8px 0;
-          font-size: 14px;
-          color: #6b7280;
-        }
-
-        .filter-indicator {
-          font-weight: 500;
-          color: #2563eb;
-        }
-
-        .dependencies-list {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          margin-top: 16px;
-          max-height: 600px;
-          overflow-y: auto;
-        }
-
-        .dependency-item {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 8px 12px;
-          border: 1px solid #e5e7eb;
-          border-radius: 4px;
-          font-size: 14px;
-        }
-
-        .dependency-source,
-        .dependency-target {
-          flex: 1;
-          font-family: monospace;
-          min-width: 0; /* Allow flex items to shrink */
-        }
-
-        .dependency-path {
-          font-size: 11px;
-          color: #9ca3af;
-          margin-top: 2px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .dependency-arrow {
-          color: #6b7280;
-        }
-
-        .dependency-type {
-          min-width: 80px;
-          font-size: 12px;
-          color: #6b7280;
-          text-align: right;
-        }
-
-        .more-dependencies {
-          padding: 12px;
-          text-align: center;
-          color: #6b7280;
-        }
-
-        .show-all-btn {
-          background: #2563eb;
+          border-bottom: 2px solid #e0e7ff;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           color: white;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
-        }
-
-        .show-all-btn:hover {
-          background: #1d4ed8;
-        }
-
-        .no-results {
-          text-align: center;
-          padding: 40px;
-          color: #6b7280;
-        }
-
-        /* Graph View Styles */
-        .graph-view {
-          margin-top: 20px;
-        }
-
-        .graph-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-          padding: 16px 20px;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
-        }
-
-        .graph-controls {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-        }
-
-        .lod-select {
-          padding: 6px 12px;
-          border: 1px solid #d1d5db;
-          border-radius: 6px;
-          font-size: 14px;
-          background: white;
-          cursor: pointer;
-        }
-
-        .lod-select:focus {
-          outline: none;
-          border-color: #2563eb;
-        }
-
-        .selected-node-info {
-          font-size: 14px;
-          color: #2563eb;
-          padding: 6px 12px;
-          background: #eff6ff;
-          border-radius: 6px;
-        }
-
-        .graph-type-selector {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 12px 16px;
-          background: #f0f9ff;
-          border: 1px solid #bae6fd;
-          border-radius: 8px;
-          margin: 16px 0;
-        }
-
-        .selector-group {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .selector-group label {
-          font-weight: 600;
-          color: #0c4a6e;
-          font-size: 14px;
-        }
-
-        .graph-type-select {
-          padding: 6px 12px;
-          border: 1px solid #0284c7;
-          border-radius: 6px;
-          background: white;
-          font-size: 14px;
-          cursor: pointer;
-          min-width: 200px;
-        }
-
-        .graph-type-select:focus {
-          outline: none;
-          border-color: #0369a1;
-          box-shadow: 0 0 0 2px #bae6fd;
-        }
-
-        .graph-description {
-          font-size: 13px;
-          color: #0369a1;
-          font-style: italic;
-        }
-
-        .edge-filter-compact {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin: 8px 0;
-          padding: 6px 12px;
-          background: #f0f9ff;
-          border: 1px solid #0ea5e9;
-          border-radius: 6px;
-          font-size: 14px;
-        }
-
-        .filter-badge {
-          color: #0369a1;
-          font-weight: 500;
-        }
-
-        .filter-type-badge {
-          color: #64748b;
-          font-weight: 400;
-          margin-left: 4px;
-        }
-
-        .clear-filter-compact {
-          background: #ef4444;
-          color: white;
-          border: none;
-          width: 18px;
-          height: 18px;
-          border-radius: 50%;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 12px;
-          font-weight: bold;
-          transition: all 0.2s;
-          flex-shrink: 0;
-        }
-
-        .clear-filter-compact:hover {
-          background: #dc2626;
-          transform: scale(1.1);
-        }
-
-        /* Tree-based graph layout - Full width */
-        .tree-based-graph-container {
-          display: flex;
-          gap: 20px;
-          margin-top: 20px;
-          height: calc(100vh - 200px); /* Use most of viewport height */
-          /* Break out of parent container for full width */
-          margin-left: -20px;
-          margin-right: -20px;
-          padding: 0 20px;
-          background: #fafbfc;
-          border-top: 1px solid #e2e8f0;
-        }
-
-        .tree-sidebar {
-          width: 350px;
-          flex-shrink: 0;
-          height: 100%;
-          overflow: hidden;
-          background: white;
-          border-right: 1px solid #e2e8f0;
-          display: flex;
-          flex-direction: column;
-          transition: all 0.3s ease;
-        }
-
-        .tree-based-graph-container.tree-collapsed .tree-sidebar {
-          width: 0;
-          opacity: 0;
-        }
-
-        .tree-sidebar-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 12px 16px;
-          background: #f8fafc;
-          border-bottom: 1px solid #e2e8f0;
-          flex-shrink: 0;
-        }
-
-        .tree-sidebar-header h4 {
           margin: 0;
-          font-size: 14px;
-          color: #374151;
+        }
+
+        .results-header h2 {
+          margin: 0;
+          font-size: 1.5em;
+          text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+
+        .tab-navigation {
+          display: flex;
+          gap: 4px;
+        }
+
+        .tab {
+          padding: 8px 16px;
+          border: none;
+          background: rgba(255, 255, 255, 0.2);
+          color: white;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 0.9em;
+          font-weight: 500;
+          transition: all 0.2s ease;
+          backdrop-filter: blur(10px);
+        }
+
+        .tab:hover {
+          background: rgba(255, 255, 255, 0.3);
+          transform: translateY(-1px);
+        }
+
+        .tab.active {
+          background: rgba(255, 255, 255, 0.9);
+          color: #4C51BF;
           font-weight: 600;
         }
 
-        .collapse-button {
-          background: #ef4444;
-          color: white;
-          border: none;
-          width: 24px;
-          height: 24px;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.2s;
-        }
-
-        .collapse-button:hover {
-          background: #dc2626;
-          transform: scale(1.1);
-        }
-
-        .tree-content {
+        .tab-content {
           flex: 1;
-          overflow: auto;
-        }
-
-        .tree-loading {
-          padding: 40px 20px;
-          text-align: center;
-          color: #6b7280;
-          font-size: 14px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 8px;
-        }
-
-        .graph-main {
-          flex: 1;
-          height: 100%;
-          min-width: 0;
-          position: relative;
-          background: white;
-        }
-
-        .expand-tree-button {
-          position: absolute;
-          top: 16px;
-          left: 16px;
-          background: #3b82f6;
-          color: white;
-          border: none;
-          padding: 8px 12px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 12px;
-          font-weight: 500;
-          z-index: 100;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          transition: all 0.2s;
-          box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
-        }
-
-        .expand-tree-button:hover {
-          background: #2563eb;
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-        }
-
-        .tree-based-cytoscape-container {
-          width: 100%;
-          height: 100%;
-          position: relative;
-        }
-
-        .graph-loading {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          background: rgba(255, 255, 255, 0.9);
-          padding: 20px;
-          border-radius: 8px;
-          border: 1px solid #e5e7eb;
-          color: #6b7280;
-          font-size: 14px;
-          z-index: 1000;
-        }
-
-        /* Responsive adjustments */
-        @media (max-width: 1200px) {
-          .tree-based-graph-container {
-            flex-direction: column;
-            height: auto;
-            margin-left: -10px;
-            margin-right: -10px;
-            padding: 0 10px;
-          }
-
-          .tree-sidebar {
-            width: 100%;
-            height: 300px;
-          }
-
-          .tree-based-graph-container.tree-collapsed .tree-sidebar {
-            height: 0;
-          }
-
-          .graph-main {
-            height: 500px;
-          }
-
-          .expand-tree-button {
-            top: 8px;
-            left: 8px;
-            padding: 6px 10px;
-            font-size: 11px;
-          }
-        }
-
-        @media (max-width: 768px) {
-          .tree-based-graph-container {
-            margin-left: -10px;
-            margin-right: -10px;
-            padding: 0 10px;
-            height: calc(100vh - 250px);
-          }
+          padding: 0;
+          overflow: hidden;
+          min-height: 0;
+          max-height: calc(100vh - 200px);
+          height: auto;
         }
       `}</style>
-      <style jsx>{treeViewStyles}</style>
     </div>
   );
 };
