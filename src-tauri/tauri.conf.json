@@ -5,7 +5,7 @@
   "identifier": "com.dev.chronograph",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:1429"
+    "devUrl": "http://localhost:1422"
   },
   "app": {
     "withGlobalTauri": true,

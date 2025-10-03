@@ -40,10 +40,27 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
     ? calculateVisualEncoding(nodeMetrics, globalMetrics, visualEncodingConfig)
     : null;
 
-  // Get basic dependency information
+  // Get basic dependency information with path normalization
   const dependencies = analysisResult?.dependencies || [];
-  const incomingDeps = dependencies.filter(dep => dep.target_file === selectedNodeId);
-  const outgoingDeps = dependencies.filter(dep => dep.source_file === selectedNodeId);
+
+  // Normalize the selected node ID for comparison
+  const normalizePathForComparison = (path: string) => {
+    return path.replace(/\\/g, '/').replace(/^\/+/, '');
+  };
+
+  const normalizedSelectedId = normalizePathForComparison(selectedNodeId);
+
+  const incomingDeps = dependencies.filter(dep => {
+    const normalizedTarget = normalizePathForComparison(dep.target_file);
+    return normalizedTarget === normalizedSelectedId ||
+           normalizedTarget.endsWith('/' + normalizedSelectedId);
+  });
+
+  const outgoingDeps = dependencies.filter(dep => {
+    const normalizedSource = normalizePathForComparison(dep.source_file);
+    return normalizedSource === normalizedSelectedId ||
+           normalizedSource.endsWith('/' + normalizedSelectedId);
+  });
 
   // Debug logging for dependency matching
   console.log('🔍 NodeDetailsPanel Debug:', {
@@ -74,6 +91,15 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
   const fileName = selectedNodeId.split('/').pop() || selectedNodeId;
   const isFile = fileName.includes('.');
 
+  // Calculate file count for folders
+  const fileCount = !isFile && analysisResult?.analyzed_files
+    ? analysisResult.analyzed_files.filter(file => {
+        const normalizedFile = file.replace(/\\/g, '/').replace(/^\/+/, '');
+        const normalizedFolder = selectedNodeId.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+        return normalizedFile === normalizedFolder || normalizedFile.startsWith(normalizedFolder + '/');
+      }).length
+    : 0;
+
   return (
     <div className="node-details-panel">
       <div className="panel-header">
@@ -90,23 +116,34 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
       </div>
 
       <div className="panel-content">
-        <div className="section">
-          <h4>📊 Basic Information</h4>
+        <div className="section compact">
           <div className="info-grid">
             <div className="info-item">
               <span className="label">Type:</span>
               <span className="value">{isFile ? 'File' : 'Folder'}</span>
             </div>
             <div className="info-item">
-              <span className="label">Full Path:</span>
+              <span className="label">Path:</span>
               <span className="value path">{selectedNodeId}</span>
             </div>
+            {hasEnhanced && nodeMetrics && (
+              <div className="info-item">
+                <span className="label">SLOC:</span>
+                <span className="value highlight">{nodeMetrics.sloc.toLocaleString()}</span>
+              </div>
+            )}
+            {!isFile && fileCount > 0 && (
+              <div className="info-item">
+                <span className="label">Files:</span>
+                <span className="value highlight">{fileCount.toLocaleString()}</span>
+              </div>
+            )}
             <div className="info-item">
-              <span className="label">Incoming Dependencies:</span>
+              <span className="label">Incoming:</span>
               <span className="value">{incomingDeps.length}</span>
             </div>
             <div className="info-item">
-              <span className="label">Outgoing Dependencies:</span>
+              <span className="label">Outgoing:</span>
               <span className="value">{outgoingDeps.length}</span>
             </div>
           </div>
@@ -114,15 +151,11 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
 
         {hasEnhanced && nodeMetrics && globalMetrics && (
           <>
-            <div className="section">
+            <div className="section compact">
               <h4>📈 Lakos Metrics</h4>
               <div className="info-grid">
                 <div className="info-item">
-                  <span className="label">Source Lines of Code (SLOC):</span>
-                  <span className="value highlight">{nodeMetrics.sloc.toLocaleString()}</span>
-                </div>
-                <div className="info-item">
-                  <span className="label">Component Dependency (CD):</span>
+                  <span className="label">Component Dependency:</span>
                   <span className="value">{nodeMetrics.component_dependency}</span>
                 </div>
                 <div className="info-item">
@@ -305,35 +338,30 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
 
       <style jsx>{`
         .node-details-panel {
-          position: fixed;
-          top: 50%;
-          right: 20px;
-          transform: translateY(-50%);
-          width: 400px;
-          max-height: 80vh;
+          position: relative;
+          width: 100%;
+          height: 100%;
           background: white;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-          z-index: 1000;
+          border-top: 1px solid #e2e8f0;
           overflow: hidden;
           display: flex;
           flex-direction: column;
         }
 
         .panel-header {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          padding: 16px 20px;
+          background: #f8fafc;
+          color: #374151;
+          padding: 10px 12px;
           display: flex;
           justify-content: space-between;
           align-items: center;
           flex-shrink: 0;
+          border-bottom: 1px solid #e2e8f0;
         }
 
         .panel-title {
           margin: 0;
-          font-size: 16px;
+          font-size: 13px;
           font-weight: 600;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -342,14 +370,14 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
         }
 
         .close-button {
-          background: rgba(255, 255, 255, 0.2);
+          background: #ef4444;
           border: none;
           color: white;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
+          width: 22px;
+          height: 22px;
+          border-radius: 4px;
           cursor: pointer;
-          font-size: 14px;
+          font-size: 11px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -358,8 +386,8 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
         }
 
         .close-button:hover {
-          background: rgba(255, 255, 255, 0.3);
-          transform: scale(1.05);
+          background: #dc2626;
+          transform: scale(1.1);
         }
 
         .panel-content {
@@ -369,8 +397,12 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
         }
 
         .section {
-          padding: 20px;
+          padding: 16px;
           border-bottom: 1px solid #f0f0f0;
+        }
+
+        .section.compact {
+          padding: 12px 16px;
         }
 
         .section:last-child {
@@ -399,7 +431,11 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
         .info-grid {
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 8px;
+        }
+
+        .section.compact .info-grid {
+          gap: 4px;
         }
 
         .info-item {
@@ -407,7 +443,11 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
           justify-content: space-between;
           align-items: flex-start;
           gap: 12px;
-          padding: 8px 0;
+          padding: 4px 0;
+        }
+
+        .section.compact .info-item {
+          padding: 2px 0;
         }
 
         .info-item.warning {

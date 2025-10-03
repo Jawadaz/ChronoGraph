@@ -69,10 +69,35 @@ export const DependenciesTab: React.FC<DependenciesTabProps> = ({
     );
 
     if (edgeFilter) {
+      // Normalize paths for comparison
+      const normalizePathForComparison = (path: string) => {
+        let normalized = path.replace(/\\/g, '/').replace(/^\/+/, '');
+        // Strip cache directory prefix if present
+        const cacheMatch = normalized.match(/^(?:tmp\/)?chronograph[\/\\][^\/\\]+[\/\\](.+)$/);
+        if (cacheMatch) {
+          normalized = cacheMatch[1];
+        }
+        return normalized;
+      };
+
+      const normalizedSourceFilter = normalizePathForComparison(edgeFilter.sourceId);
+      const normalizedTargetFilter = normalizePathForComparison(edgeFilter.targetId);
+
       filtered = filtered.filter(dep => {
-        const sourceMatch = dep.source_file === edgeFilter.sourceId;
-        const targetMatch = dep.target_file === edgeFilter.targetId;
-        const typeMatch = edgeFilter.relationshipTypes.includes(dep.relationship_type);
+        const normalizedSource = normalizePathForComparison(dep.source_file);
+        const normalizedTarget = normalizePathForComparison(dep.target_file);
+
+        // Match exact paths OR files within folders
+        const sourceMatch =
+          normalizedSource === normalizedSourceFilter ||
+          normalizedSource.startsWith(normalizedSourceFilter + '/');
+
+        const targetMatch =
+          normalizedTarget === normalizedTargetFilter ||
+          normalizedTarget.startsWith(normalizedTargetFilter + '/');
+
+        const typeMatch = edgeFilter.relationshipTypes.length === 0 ||
+                         edgeFilter.relationshipTypes.includes(dep.relationship_type);
 
         return sourceMatch && targetMatch && typeMatch;
       });

@@ -87,13 +87,19 @@ fn detect_dart_sdk() -> Result<PathBuf> {
 - **Error UX**: Better error presentation and recovery suggestions
 - **Visualization Performance**: Optimization for large dependency graphs
 - **Responsive Design**: Better handling of varying screen sizes
+- **Graph Visual Improvements**: ✅ **COMPLETED** - Rectangular file nodes, barrel-shaped folder nodes, alternating folder backgrounds
+- **Color Encoding**: ✅ **COMPLETED** - Aggregate folder colors based on child metrics, instability-based color gradients
 - **Progressive Disclosure Edge Cases**: Handle relative vs. absolute path data structures from different analysis sources
+- **Folder Toggle State**: ❌ **BLOCKED** - Double-click folder expansion requires tree state refactoring (treeNodes empty in graph view)
 
 ### Code Quality
-- **Test Coverage**: ✅ **SIGNIFICANTLY IMPROVED** - 6 comprehensive cache tests + existing frontend tests
+- **Test Coverage**: ✅ **SIGNIFICANTLY IMPROVED** - 63 total tests (52 core + 11 new GraphTab tests)
+  - GraphTab folder toggle logic: 11 tests for node lookup and state management
+  - DependenciesTab edge filtering: 19 tests for path normalization
+  - Comprehensive cache tests + existing frontend tests
 - **Error Types**: Structured error handling with custom error types
 - **Documentation**: ✅ **UPDATED** - API documentation and user guides updated for cache functionality
-- **Logging**: Structured logging with configurable levels
+- **Logging**: Reduced excessive debug output, retained essential system logs
 
 ## Current Priority Matrix
 - **P0 (Completed)**:

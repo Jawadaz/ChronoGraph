@@ -57,6 +57,80 @@ export const GraphTab: React.FC<GraphTabProps> = ({
   handleTreeCheckboxChange,
   handleEdgeDoubleClick
 }) => {
+  const [detailsPanelHeight, setDetailsPanelHeight] = React.useState(50);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [hoveredNodeId, setHoveredNodeId] = React.useState<string | null>(null);
+
+  const handleFolderToggle = (nodeId: string) => {
+    console.log('🔍 Searching for node:', nodeId, 'in tree with', treeNodes.size, 'nodes');
+
+    // Find the node - it might be a full path or just the folder name
+    let node = treeNodes.get(nodeId);
+    let foundKey = nodeId;
+
+    // If not found directly, search for it in the tree
+    if (!node) {
+      for (const [key, treeNode] of treeNodes.entries()) {
+        if (key === nodeId || key.endsWith('/' + nodeId) || key.endsWith('\\' + nodeId)) {
+          console.log('✅ Found match:', key, 'for nodeId:', nodeId);
+          node = treeNode;
+          foundKey = key;
+          break;
+        }
+      }
+    }
+
+    if (!node) {
+      console.log('❌ Node not found. Available keys:', Array.from(treeNodes.keys()).slice(0, 10));
+      return;
+    }
+
+    if (node.type !== 'folder') {
+      console.log('❌ Not a folder, type:', node.type);
+      return;
+    }
+
+    // Toggle between checked (expanded) and half-checked (collapsed)
+    const newState = node.checkboxState === 'checked' ? 'half-checked' : 'checked';
+    console.log(`🔄 Toggling ${foundKey} from ${node.checkboxState} to ${newState}`);
+    handleTreeCheckboxChange(foundKey, newState);
+  };
+
+  const handleMouseDown = () => {
+    setIsDragging(true);
+  };
+
+  React.useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+
+      const sidebar = document.querySelector('.tree-sidebar') as HTMLElement;
+      if (!sidebar) return;
+
+      const rect = sidebar.getBoundingClientRect();
+      const offsetY = e.clientY - rect.top;
+      const percentage = (offsetY / rect.height) * 100;
+
+      // Clamp between 20% and 80%
+      const clampedPercentage = Math.max(20, Math.min(80, 100 - percentage));
+      setDetailsPanelHeight(clampedPercentage);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
+
   return (
     <div className="graph-view">
 
@@ -80,12 +154,43 @@ export const GraphTab: React.FC<GraphTabProps> = ({
                   nodes={treeNodes}
                   rootId={treeRootId}
                   onCheckboxChange={handleTreeCheckboxChange}
+                  hoveredNodeId={hoveredNodeId}
+                  onNodeHover={setHoveredNodeId}
                 />
               </div>
             ) : (
               <div className="tree-loading">
                 🌳 Building project tree...
               </div>
+            )}
+
+            {/* Node Details Panel below tree */}
+            {selectedGraphNode && (
+              <>
+                <div
+                  className="resize-handle"
+                  onMouseDown={handleMouseDown}
+                  title="Drag to resize"
+                />
+                <div
+                  className="node-details-container"
+                  style={{ flex: `0 0 ${detailsPanelHeight}%` }}
+                >
+                  <NodeDetailsPanel
+                    selectedNodeId={selectedGraphNode}
+                    analysisResult={selectedCommit.analysis_result}
+                    visualEncodingConfig={{
+                      enable_size_encoding: true,
+                      enable_color_encoding: true,
+                      size_scaling_factor: 1.0,
+                      color_intensity: 1.0,
+                      highlight_orphans: true,
+                      highlight_cycles: true
+                    }}
+                    onClose={() => setSelectedGraphNode(null)}
+                  />
+                </div>
+              </>
             )}
           </div>
         )}
@@ -114,23 +219,12 @@ export const GraphTab: React.FC<GraphTabProps> = ({
             }}
             onNodeSelect={setSelectedGraphNode}
             onEdgeDoubleClick={handleEdgeDoubleClick}
+            hoveredNodeId={hoveredNodeId}
+            onNodeHover={setHoveredNodeId}
+            onToggleFolderExpansion={handleFolderToggle}
           />
         </div>
       </div>
-
-      <NodeDetailsPanel
-        selectedNodeId={selectedGraphNode}
-        analysisResult={selectedCommit.analysis_result}
-        visualEncodingConfig={{
-          enable_size_encoding: true,
-          enable_color_encoding: true,
-          size_scaling_factor: 1.0,
-          color_intensity: 1.0,
-          highlight_orphans: true,
-          highlight_cycles: true
-        }}
-        onClose={() => setSelectedGraphNode(null)}
-      />
 
       <style jsx>{`
         .graph-view {
@@ -173,7 +267,7 @@ export const GraphTab: React.FC<GraphTabProps> = ({
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 12px 16px;
+          padding: 10px 12px;
           background: #f8fafc;
           border-bottom: 1px solid #e2e8f0;
           flex-shrink: 0;
@@ -181,7 +275,7 @@ export const GraphTab: React.FC<GraphTabProps> = ({
 
         .tree-sidebar-header h4 {
           margin: 0;
-          font-size: 14px;
+          font-size: 13px;
           color: #374151;
           font-weight: 600;
         }
@@ -190,11 +284,11 @@ export const GraphTab: React.FC<GraphTabProps> = ({
           background: #ef4444;
           color: white;
           border: none;
-          width: 24px;
-          height: 24px;
+          width: 22px;
+          height: 22px;
           border-radius: 4px;
           cursor: pointer;
-          font-size: 12px;
+          font-size: 11px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -209,7 +303,30 @@ export const GraphTab: React.FC<GraphTabProps> = ({
         .tree-content {
           flex: 1;
           overflow: hidden;
-          height: calc(100% - 60px);
+          min-height: 0;
+        }
+
+        .resize-handle {
+          height: 4px;
+          background: #cbd5e1;
+          cursor: ns-resize;
+          flex-shrink: 0;
+          transition: background 0.2s;
+          position: relative;
+        }
+
+        .resize-handle:hover {
+          background: #94a3b8;
+        }
+
+        .resize-handle:active {
+          background: #64748b;
+        }
+
+        .node-details-container {
+          overflow: hidden;
+          min-height: 0;
+          flex-shrink: 0;
         }
 
         .tree-loading {

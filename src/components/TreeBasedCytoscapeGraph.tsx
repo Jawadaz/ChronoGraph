@@ -20,6 +20,9 @@ interface TreeBasedCytoscapeGraphProps {
   visualEncodingConfig?: VisualEncodingConfig;
   onNodeSelect?: (nodeId: string) => void;
   onEdgeDoubleClick?: (sourceId: string, targetId: string, relationshipTypes: string[]) => void;
+  hoveredNodeId?: string | null;
+  onNodeHover?: (nodeId: string | null) => void;
+  onToggleFolderExpansion?: (nodeId: string) => void;
 }
 
 export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = ({
@@ -35,7 +38,10 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     highlight_cycles: true
   },
   onNodeSelect,
-  onEdgeDoubleClick
+  onEdgeDoubleClick,
+  hoveredNodeId,
+  onNodeHover,
+  onToggleFolderExpansion
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
@@ -102,6 +108,17 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       });
     });
 
+    // Double-click on folder nodes to toggle expansion
+    cy.on('dblclick', 'node', (event) => {
+      const node = event.target;
+      const nodeData = node.data();
+
+      // Only handle folders (compound nodes)
+      if (nodeData.type === 'folder' && onToggleFolderExpansion) {
+        onToggleFolderExpansion(nodeData.id);
+      }
+    });
+
     cy.on('dblclick', 'edge', (event) => {
       const edge = event.target;
       const edgeData = edge.data();
@@ -126,6 +143,11 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       const node = event.target;
       const nodeId = node.id();
 
+      // Notify parent about hover
+      if (onNodeHover) {
+        onNodeHover(nodeId);
+      }
+
       // Reset all elements first
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
 
@@ -147,6 +169,11 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     });
 
     cy.on('mouseout', 'node', (event) => {
+      // Notify parent about hover end
+      if (onNodeHover) {
+        onNodeHover(null);
+      }
+
       // Remove all highlighting
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
     });
@@ -262,6 +289,40 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
 
   }, [dependencies, treeNodes, forceUpdate]);
 
+  // Handle external hover from tree
+  useEffect(() => {
+    if (!cyRef.current) return;
+
+    const cy = cyRef.current;
+
+    // Remove all previous highlighting
+    cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
+
+    if (hoveredNodeId) {
+      const node = cy.getElementById(hoveredNodeId);
+
+      if (node && node.length > 0) {
+        const nodeId = node.id();
+
+        // Get connected edges
+        const connectedEdges = node.connectedEdges();
+        const incomingEdges = connectedEdges.filter(edge => edge.target().id() === nodeId);
+        const outgoingEdges = connectedEdges.filter(edge => edge.source().id() === nodeId);
+
+        // Highlight incoming connections
+        incomingEdges.addClass('highlighted-incoming');
+        incomingEdges.sources().addClass('highlighted-source');
+
+        // Highlight outgoing connections
+        outgoingEdges.addClass('highlighted-outgoing');
+        outgoingEdges.targets().addClass('highlighted-target');
+
+        // Highlight the hovered node itself
+        node.addClass('highlighted-hover');
+      }
+    }
+  }, [hoveredNodeId]);
+
   // Handle settings changes
   const handleSettingsChange = (nodeCount: number, sizes: any, layout: any) => {
     console.log('🎨 Settings changed:', { nodeCount, sizes, layout });
@@ -328,24 +389,10 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
           style={{
             width: '100%',
             height: '100%',
-            border: '3px solid #ff0000',
             borderRadius: '8px',
-            background: '#ffeeee'
+            background: '#ffffff'
           }}
         />
-        <div style={{
-          position: 'absolute',
-          top: '10px',
-          left: '10px',
-          background: 'red',
-          color: 'white',
-          padding: '5px',
-          borderRadius: '4px',
-          fontSize: '12px',
-          zIndex: 1000
-        }}>
-          TreeBasedCytoscapeGraph Active
-        </div>
         {!isInitialized && (
           <div className="graph-loading">
             🔄 Initializing Cytoscape graph...
@@ -414,8 +461,8 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
         .settings-header-controls {
           display: flex;
           justify-content: flex-end;
-          padding: 8px;
-          background: #f1f5f9;
+          padding: 10px 12px;
+          background: #f8fafc;
           border-bottom: 1px solid #e2e8f0;
           flex-shrink: 0;
         }
@@ -567,22 +614,82 @@ const getEnhancedNodeColor = (
   analysisResult?: AnalysisResult,
   config?: VisualEncodingConfig
 ): string => {
-  if (!analysisResult || !hasEnhancedMetrics(analysisResult) || !config?.enable_color_encoding) {
+  if (!analysisResult || !hasEnhancedMetrics(analysisResult)) {
     return '#64748b'; // Default gray
   }
 
-  const nodeMetrics = getNodeMetrics(analysisResult, filePath);
+  // Helper to normalize path for comparison
+  const normalizePath = (path: string): string => {
+    let normalized = path.replace(/\\/g, '/').replace(/^\/+/, '');
+    // Strip cache directory prefix if present
+    const cacheMatch = normalized.match(/^(?:tmp\/)?chronograph[\/\\][^\/\\]+[\/\\](.+)$/);
+    if (cacheMatch) {
+      normalized = cacheMatch[1];
+    }
+    return normalized;
+  };
+
+  const normalizedFilePath = normalizePath(filePath);
+
+  // Try to find metrics by normalized path
+  let nodeMetrics = getNodeMetrics(analysisResult, filePath);
+
+  // If no exact match, try all keys with normalization
+  if (!nodeMetrics && analysisResult.node_metrics) {
+    for (const [key, metrics] of Object.entries(analysisResult.node_metrics)) {
+      if (normalizePath(key) === normalizedFilePath) {
+        nodeMetrics = metrics;
+        break;
+      }
+    }
+  }
+
+  // If still no direct metrics (likely a folder), calculate aggregate metrics from children
+  if (!nodeMetrics && analysisResult.node_metrics) {
+    const childMetrics = Object.entries(analysisResult.node_metrics)
+      .filter(([path]) => {
+        const normalized = normalizePath(path);
+        // Match children: path starts with folder/ (exact prefix match)
+        return normalized.startsWith(normalizedFilePath + '/') ||
+               // Also match nested folders
+               (normalized.startsWith(normalizedFilePath) && normalized !== normalizedFilePath);
+      })
+      .map(([, metrics]) => metrics);
+
+    if (childMetrics.length > 0) {
+      // Calculate average instability for the folder
+      const avgInstability = childMetrics.reduce((sum, m) => sum + m.instability, 0) / childMetrics.length;
+      const totalSloc = childMetrics.reduce((sum, m) => sum + m.sloc, 0);
+
+      nodeMetrics = {
+        instability: avgInstability,
+        sloc: totalSloc,
+        fan_in: childMetrics.reduce((sum, m) => sum + m.fan_in, 0),
+        fan_out: childMetrics.reduce((sum, m) => sum + m.fan_out, 0),
+        is_orphan: childMetrics.every(m => m.is_orphan),
+        in_cycle: childMetrics.some(m => m.in_cycle)
+      };
+    }
+  }
+
   if (!nodeMetrics) {
     return '#64748b'; // Default gray if no metrics
+  }
+
+  // Use color encoding even if not explicitly enabled, but respect the config if present
+  const shouldUseColor = config?.enable_color_encoding !== false; // Default to true
+
+  if (!shouldUseColor) {
+    return '#64748b';
   }
 
   // Calculate visual encoding
   const encoding = calculateVisualEncoding(nodeMetrics, analysisResult.global_metrics, config);
 
-  // Convert HSL to hex color
+  // Convert HSL to hex color with better variation
   const hue = encoding.color_hue;
-  const saturation = 70; // Keep saturation consistent
-  const lightness = encoding.is_orphan ? 30 : (encoding.in_cycle ? 40 : 50);
+  const saturation = 65; // Slightly reduced for better visibility
+  const lightness = encoding.is_orphan ? 35 : (encoding.in_cycle ? 42 : 48);
 
   return hslToHex(hue, saturation, lightness);
 };
@@ -618,15 +725,38 @@ const calculateFolderSLOC = (
   folderPath: string,
   analysisResult: AnalysisResult
 ): number => {
-  if (!analysisResult.node_metrics) return 0;
+  if (!analysisResult.node_metrics) {
+    console.log(`📁 calculateFolderSLOC: No node_metrics for folder ${folderPath}`);
+    return 0;
+  }
+
+  // Normalize paths: remove leading/trailing slashes for consistent comparison
+  const normalizedFolderPath = folderPath.replace(/^\/+|\/+$/g, '').replace(/\\/g, '/');
 
   let totalSLOC = 0;
+  let matchedFiles: string[] = [];
+
   for (const [filePath, metrics] of Object.entries(analysisResult.node_metrics)) {
-    // Check if file is within the folder
-    if (filePath.startsWith(folderPath + '/')) {
-      totalSLOC += metrics.sloc || 0;
+    // Normalize file path: remove leading slash, convert backslashes to forward slashes
+    let normalizedFilePath = filePath.replace(/^\/+/g, '').replace(/\\/g, '/');
+
+    // Strip the cache directory prefix if present (e.g., "tmp/chronograph/repo-cache/")
+    // This handles paths like "/tmp/chronograph\repo-cache\lib/file.dart"
+    const cacheMatch = normalizedFilePath.match(/^(?:tmp\/)?chronograph[\/\\][^\/\\]+[\/\\](.+)$/);
+    if (cacheMatch) {
+      normalizedFilePath = cacheMatch[1];
+    }
+
+    // Check if file is within the folder (file path starts with folder path + /)
+    // OR if the folder path exactly matches the file path (for root-level files)
+    if (normalizedFilePath === normalizedFolderPath ||
+        normalizedFilePath.startsWith(normalizedFolderPath + '/')) {
+      const sloc = metrics.sloc || 0;
+      totalSLOC += sloc;
+      matchedFiles.push(`${normalizedFilePath} (${sloc} SLOC)`);
     }
   }
+
   return totalSLOC;
 };
 
@@ -722,14 +852,40 @@ const getEnhancedNodeSize = (
 
   // Calculate visual encoding
   let encoding;
+
+  // Check if this is a folder (no file extension) - folders need different scaling
+  const isFolder = !filePath.includes('.');
+
   if (hasEnhancedMetrics(analysisResult) && analysisResult.global_metrics) {
-    // Use precise visual encoding when available
-    encoding = calculateVisualEncoding(nodeMetrics, analysisResult.global_metrics, config);
+    if (isFolder) {
+      // For folders, use logarithmic scaling to handle the huge range of folder sizes
+      // This provides good visual distinction across orders of magnitude
+      const minSLOC = 100; // Minimum for scaling baseline
+      const logScale = Math.log10(Math.max(nodeMetrics.sloc, minSLOC) / minSLOC);
+      // Use full range from 0.5 to 3.0 across the logarithmic scale
+      // log10(100/100) = 0 → 0.5
+      // log10(1000/100) = 1 → 1.125
+      // log10(10000/100) = 2 → 1.75
+      // log10(60000/100) = 2.78 → 2.24
+      // log10(100000/100) = 3 → 2.375
+      // log10(365901/100) = 3.56 → 2.73
+      const maxLog = 4.0; // Maximum expected log scale (10,000x baseline = 1M SLOC)
+      const normalizedLog = Math.min(logScale / maxLog, 1.0);
+      const sizeFactor = 0.5 + (normalizedLog * 2.5) * (config.size_scaling_factor || 1.0);
+
+      encoding = {
+        size_factor: sizeFactor,
+        color_factor: 0.5 // Folders get neutral color
+      };
+    } else {
+      // For files, use the standard visual encoding
+      encoding = calculateVisualEncoding(nodeMetrics, analysisResult.global_metrics, config);
+    }
   } else {
     // Fallback: simple size calculation based on relative SLOC
     const avgSLOC = 100; // Default average when no global metrics available
     const sizeFactor = Math.sqrt(nodeMetrics.sloc / avgSLOC) * (config.size_scaling_factor || 1.0);
-    const boundedSizeFactor = Math.max(0.5, Math.min(2.0, sizeFactor));
+    const boundedSizeFactor = Math.max(0.5, Math.min(3.0, sizeFactor));
 
     encoding = {
       size_factor: boundedSizeFactor,
@@ -738,6 +894,7 @@ const getEnhancedNodeSize = (
   }
 
   const enhancedSize = Math.round(baseSize * encoding.size_factor);
+
   return enhancedSize;
 };
 
@@ -752,18 +909,20 @@ const getTreeBasedCytoscapeStyles = (
 ) => {
 
   return [
-  // File nodes (always leaf nodes)
+  // File nodes (always leaf nodes) - simple rectangles
   {
     selector: 'node[type="file"]',
     style: {
-      'shape': 'ellipse',
+      'shape': 'rectangle',
       'width': (ele: any) => {
         const filePath = ele.data('id') || ele.data('label');
-        return getEnhancedNodeSize(filePath, sizes.fileSize, analysisResult, visualEncodingConfig);
+        const baseSize = getEnhancedNodeSize(filePath, sizes.fileSize, analysisResult, visualEncodingConfig);
+        return baseSize * 1.2; // Slightly wider than tall
       },
       'height': (ele: any) => {
         const filePath = ele.data('id') || ele.data('label');
-        return getEnhancedNodeSize(filePath, sizes.fileSize, analysisResult, visualEncodingConfig);
+        const baseSize = getEnhancedNodeSize(filePath, sizes.fileSize, analysisResult, visualEncodingConfig);
+        return baseSize * 0.8; // Smaller height to make files more compact
       },
       'background-color': (ele: any) => {
         const filePath = ele.data('id') || ele.data('label');
@@ -802,18 +961,20 @@ const getTreeBasedCytoscapeStyles = (
     }
   },
 
-  // Collapsed folder nodes (act as leaf nodes)
+  // Collapsed folder nodes (act as leaf nodes) - folder-tab shape
   {
     selector: 'node[type="folder"].leaf',
     style: {
-      'shape': 'round-rectangle',
+      'shape': 'barrel', // Closest to folder-tab appearance in Cytoscape
       'width': (ele: any) => {
         const filePath = ele.data('id') || ele.data('label');
-        return getEnhancedNodeSize(filePath, sizes.folderWidth, analysisResult, visualEncodingConfig);
+        const baseSize = getEnhancedNodeSize(filePath, sizes.folderWidth, analysisResult, visualEncodingConfig);
+        return baseSize * 1.3; // Make folders larger than files
       },
       'height': (ele: any) => {
         const filePath = ele.data('id') || ele.data('label');
-        return getEnhancedNodeSize(filePath, sizes.folderHeight, analysisResult, visualEncodingConfig);
+        const baseSize = getEnhancedNodeSize(filePath, sizes.folderHeight, analysisResult, visualEncodingConfig);
+        return baseSize * 1.1; // Slightly taller
       },
       'background-color': (ele: any) => {
         const filePath = ele.data('id') || ele.data('label');
@@ -855,15 +1016,36 @@ const getTreeBasedCytoscapeStyles = (
   },
 
 
-  // Parent nodes (Cytoscape compound pattern)
+  // Parent nodes (Cytoscape compound pattern) - with alternating colors by depth
   {
     selector: ':parent',
     style: {
       'shape': 'round-rectangle',
-      'background-color': '#f1f5f9',
+      'background-color': (ele: any) => {
+        // Calculate folder depth by counting slashes in the path
+        const filePath = ele.data('id') || '';
+        const depth = (filePath.match(/\//g) || []).length;
+
+        // Alternate between more contrasting shades
+        const colors = [
+          '#dbeafe', // Light blue (even depth)
+          '#f3f4f6', // Light gray (odd depth)
+        ];
+        return colors[depth % 2];
+      },
       'background-opacity': 0.7,
       'border-width': '2px',
-      'border-color': '#94a3b8',
+      'border-color': (ele: any) => {
+        const filePath = ele.data('id') || '';
+        const depth = (filePath.match(/\//g) || []).length;
+
+        // Alternate border colors with more contrast
+        const colors = [
+          '#60a5fa', // Blue (even depth)
+          '#9ca3af', // Gray (odd depth)
+        ];
+        return colors[depth % 2];
+      },
       'border-style': 'dashed',
       'label': 'data(label)',
       'font-size': `${Math.max(sizes.fontSize + 2, 8)}px`,

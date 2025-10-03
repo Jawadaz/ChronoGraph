@@ -5,6 +5,8 @@ interface TreeViewProps {
   nodes: Map<string, TreeNode>;
   rootId: string;
   onCheckboxChange: (nodeId: string, newState: CheckboxState) => void;
+  hoveredNodeId?: string | null;
+  onNodeHover?: (nodeId: string | null) => void;
 }
 
 interface TreeNodeItemProps {
@@ -14,9 +16,11 @@ interface TreeNodeItemProps {
   onToggleExpansion: (nodeId: string) => void;
   expandedNodes: Set<string>;
   level: number;
+  hoveredNodeId?: string | null;
+  onNodeHover?: (nodeId: string | null) => void;
 }
 
-export const TreeView: React.FC<TreeViewProps> = ({ nodes, rootId, onCheckboxChange }) => {
+export const TreeView: React.FC<TreeViewProps> = ({ nodes, rootId, onCheckboxChange, hoveredNodeId, onNodeHover }) => {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set([rootId]));
 
   // Debug logging
@@ -42,18 +46,23 @@ export const TreeView: React.FC<TreeViewProps> = ({ nodes, rootId, onCheckboxCha
 
 
   return (
-    <div className="tree-view" style={{ height: '100%', overflow: 'hidden' }}>
-      <div className="tree-content" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden' }}>
-        <TreeNodeRenderer
-          nodeId={rootId}
-          nodes={nodes}
-          onCheckboxChange={onCheckboxChange}
-          onToggleExpansion={handleToggleExpansion}
-          expandedNodes={expandedNodes}
-          level={0}
-        />
+    <>
+      <div className="tree-view" style={{ height: '100%', overflow: 'hidden' }}>
+        <div className="tree-content" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden' }}>
+          <TreeNodeRenderer
+            nodeId={rootId}
+            nodes={nodes}
+            onCheckboxChange={onCheckboxChange}
+            onToggleExpansion={handleToggleExpansion}
+            expandedNodes={expandedNodes}
+            level={0}
+            hoveredNodeId={hoveredNodeId}
+            onNodeHover={onNodeHover}
+          />
+        </div>
       </div>
-    </div>
+      <style dangerouslySetInnerHTML={{ __html: treeViewStyles }} />
+    </>
   );
 };
 
@@ -64,6 +73,8 @@ interface TreeNodeRendererProps {
   onToggleExpansion: (nodeId: string) => void;
   expandedNodes: Set<string>;
   level: number;
+  hoveredNodeId?: string | null;
+  onNodeHover?: (nodeId: string | null) => void;
 }
 
 const TreeNodeRenderer: React.FC<TreeNodeRendererProps> = ({
@@ -72,7 +83,9 @@ const TreeNodeRenderer: React.FC<TreeNodeRendererProps> = ({
   onCheckboxChange,
   onToggleExpansion,
   expandedNodes,
-  level
+  level,
+  hoveredNodeId,
+  onNodeHover
 }) => {
   const node = nodes.get(nodeId);
   if (!node) return null;
@@ -89,6 +102,8 @@ const TreeNodeRenderer: React.FC<TreeNodeRendererProps> = ({
         onToggleExpansion={onToggleExpansion}
         expandedNodes={expandedNodes}
         level={level}
+        hoveredNodeId={hoveredNodeId}
+        onNodeHover={onNodeHover}
       />
       {hasChildren && isExpanded && (
         <div className="tree-children">
@@ -101,6 +116,8 @@ const TreeNodeRenderer: React.FC<TreeNodeRendererProps> = ({
               onToggleExpansion={onToggleExpansion}
               expandedNodes={expandedNodes}
               level={level + 1}
+              hoveredNodeId={hoveredNodeId}
+              onNodeHover={onNodeHover}
             />
           ))}
         </div>
@@ -115,10 +132,13 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
   onCheckboxChange,
   onToggleExpansion,
   expandedNodes,
-  level
+  level,
+  hoveredNodeId,
+  onNodeHover
 }) => {
   const hasChildren = node.children.length > 0;
   const indentLevel = level * 20;
+  const isHovered = hoveredNodeId === node.fullPath;
 
   // Debug logging for root node - repository agnostic
   if (level === 0) {
@@ -171,8 +191,10 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
 
   return (
     <div
-      className={`tree-node ${node.type} checkbox-${node.checkboxState}`}
+      className={`tree-node ${node.type} checkbox-${node.checkboxState} ${isHovered ? 'hovered' : ''}`}
       style={{ paddingLeft: `${indentLevel}px` }}
+      onMouseEnter={() => onNodeHover?.(node.fullPath)}
+      onMouseLeave={() => onNodeHover?.(null)}
     >
       <div className="tree-node-content">
         {/* Expander for folders with children */}
@@ -310,6 +332,12 @@ export const treeViewStyles = `
 
 .tree-node:hover {
   background-color: #f1f5f9;
+}
+
+.tree-node.hovered {
+  background-color: #dbeafe;
+  border-left: 3px solid #3b82f6;
+  padding-left: calc(var(--indent-level) - 3px);
 }
 
 .tree-node-content {
