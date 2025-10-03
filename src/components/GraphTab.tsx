@@ -1,6 +1,8 @@
 import React from 'react';
 import { TreeBasedCytoscapeGraph } from './TreeBasedCytoscapeGraph';
 import { TreeView } from './TreeView';
+import { NodeDetailsPanel } from './NodeDetailsPanel';
+import { AnalysisResult, VisualEncodingConfig } from '../types/Dependency';
 
 interface Dependency {
   source_file: string;
@@ -29,15 +31,7 @@ interface CommitSnapshot {
     message: string;
     timestamp: number;
   };
-  analysis_result: {
-    dependencies: Dependency[];
-    analyzed_files: string[];
-    metrics: {
-      analysis_duration_ms: number;
-      total_files: number;
-      total_dependencies: number;
-    };
-  };
+  analysis_result: AnalysisResult;
 }
 
 interface GraphTabProps {
@@ -109,11 +103,34 @@ export const GraphTab: React.FC<GraphTabProps> = ({
           <TreeBasedCytoscapeGraph
             dependencies={selectedCommit.analysis_result.dependencies}
             treeNodes={treeNodes}
+            analysisResult={selectedCommit.analysis_result}
+            visualEncodingConfig={{
+              enable_size_encoding: true,
+              enable_color_encoding: true,
+              size_scaling_factor: 1.0,
+              color_intensity: 1.0,
+              highlight_orphans: true,
+              highlight_cycles: true
+            }}
             onNodeSelect={setSelectedGraphNode}
             onEdgeDoubleClick={handleEdgeDoubleClick}
           />
         </div>
       </div>
+
+      <NodeDetailsPanel
+        selectedNodeId={selectedGraphNode}
+        analysisResult={selectedCommit.analysis_result}
+        visualEncodingConfig={{
+          enable_size_encoding: true,
+          enable_color_encoding: true,
+          size_scaling_factor: 1.0,
+          color_intensity: 1.0,
+          highlight_orphans: true,
+          highlight_cycles: true
+        }}
+        onClose={() => setSelectedGraphNode(null)}
+      />
 
       <style jsx>{`
         .graph-view {
@@ -241,7 +258,7 @@ export const GraphTab: React.FC<GraphTabProps> = ({
 
         @media (max-width: 1200px) {
           .tree-based-graph-container {
-            flex-direction: column;
+            flex-direction: row;
             height: auto;
             margin-left: -10px;
             margin-right: -10px;
@@ -249,12 +266,14 @@ export const GraphTab: React.FC<GraphTabProps> = ({
           }
 
           .tree-sidebar {
-            width: 100%;
-            height: 300px;
+            width: 300px;
+            max-width: 40%;
+            height: 100%;
           }
 
           .tree-based-graph-container.tree-collapsed .tree-sidebar {
-            height: 0;
+            width: 0;
+            opacity: 0;
           }
 
           .graph-main {

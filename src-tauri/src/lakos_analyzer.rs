@@ -292,8 +292,8 @@ impl LakosAnalyzer {
         anyhow::bail!("Failed to run Lakos analysis. All attempts failed. Last error: {}. \nThis likely means:\n1. Lakos is not installed (run: dart pub global activate lakos)\n2. Dart SDK path issues in WSL environment\n3. Project is not a valid Dart/Flutter project", last_error);
     }
     
-    /// Parse lakos JSON output into RawDependency objects
-    fn parse_lakos_json(&self, json_str: &str, project_path: &Path) -> Result<Vec<RawDependency>> {
+    /// Parse lakos JSON output into enhanced analysis data
+    fn parse_lakos_json_enhanced(&self, json_str: &str, project_path: &Path) -> Result<(Vec<RawDependency>, Option<GlobalArchitecturalMetrics>, Option<HashMap<String, NodeMetrics>>)> {
         println!("🔍 DEBUG: Starting JSON parse, input length: {} chars", json_str.len());
         println!("🔍 DEBUG: JSON first 500 chars: {}", json_str.chars().take(500).collect::<String>());
         
@@ -308,16 +308,26 @@ impl LakosAnalyzer {
                        json_str.chars().take(100).collect::<String>())
             })?;
         
-        println!("🔍 DEBUG: JSON parsed successfully, looking for edges");
+        println!("🔍 DEBUG: JSON parsed successfully, parsing all metrics");
         let mut dependencies = Vec::new();
-        
-        // Lakos JSON structure: { "nodes": {...}, "edges": [...] }
+        let mut global_metrics = GlobalArchitecturalMetrics::default();
+        let mut node_metrics = HashMap::new();
+
+        // Parse global metrics from the JSON root and "graph" object
+        global_metrics = self.parse_global_metrics(&json)?;
+
+        // Parse node-level metrics from the "nodes" object
+        if let Some(nodes) = json.get("nodes").and_then(|n| n.as_object()) {
+            println!("🔍 DEBUG: Found {} nodes in JSON", nodes.len());
+            node_metrics = self.parse_node_metrics(nodes, project_path)?;
+        } else {
+            println!("🔍 DEBUG: No nodes object found in JSON");
+        }
+
+        // Parse edges (existing logic)
         if let Some(edges) = json.get("edges").and_then(|e| e.as_array()) {
             println!("🔍 DEBUG: Found {} edges in JSON", edges.len());
-            
-            // Process edges using the proper parse_lakos_edge function
-            println!("Processing {} edges...", edges.len());
-            
+
             for (i, edge) in edges.iter().enumerate() {
                 match self.parse_lakos_edge(edge, project_path) {
                     Ok(Some(dep)) => {
@@ -335,25 +345,20 @@ impl LakosAnalyzer {
                         if i < 20 {
                             println!("🔍 DEBUG: Failed to process edge {}: {} - Edge data: {:?}", i, e, edge);
                         }
-                        // Continue processing other edges instead of failing completely
                     }
                 }
-
-                // Process all edges (testing limitation removed)
             }
-            
+
             println!("Successfully processed {} dependencies from {} edges", dependencies.len(), edges.len());
         } else {
-            println!("🔍 DEBUG: No edges array found in JSON or edges is not an array");
-            if let Some(edges_val) = json.get("edges") {
-                println!("🔍 DEBUG: Found edges key but value is: {:?}", edges_val);
-            } else {
-                println!("🔍 DEBUG: No edges key found in JSON. Available keys: {:?}", 
-                        json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-            }
+            println!("🔍 DEBUG: No edges array found in JSON");
         }
-        
-        Ok(dependencies)
+
+        Ok((
+            dependencies,
+            Some(global_metrics),
+            if node_metrics.is_empty() { None } else { Some(node_metrics) }
+        ))
     }
     
     /// Parse a single edge from Lakos JSON
@@ -397,6 +402,145 @@ impl LakosAnalyzer {
         }))
     }
     
+    /// Parse global architectural metrics from Lakos JSON
+    fn parse_global_metrics(&self, json: &Value) -> Result<GlobalArchitecturalMetrics> {
+        let mut metrics = GlobalArchitecturalMetrics::default();
+
+        // Extract basic structure info
+        if let Some(nodes) = json.get("nodes").and_then(|n| n.as_object()) {
+            metrics.num_nodes = nodes.len() as u32;
+        }
+
+        if let Some(edges) = json.get("edges").and_then(|e| e.as_array()) {
+            metrics.num_edges = edges.len() as u32;
+        }
+
+        // Calculate average degree
+        if metrics.num_nodes > 0 {
+            metrics.avg_degree = (metrics.num_edges as f64 * 2.0) / metrics.num_nodes as f64;
+        }
+
+        // Extract Lakos-specific metrics if available in the JSON
+        if let Some(graph_info) = json.get("graph") {
+            if let Some(is_acyclic) = graph_info.get("isAcyclic").and_then(|v| v.as_bool()) {
+                metrics.is_acyclic = is_acyclic;
+            }
+
+            if let Some(ccd) = graph_info.get("ccd").and_then(|v| v.as_u64()) {
+                metrics.cumulative_component_dependency = ccd as u32;
+            }
+
+            if let Some(acd) = graph_info.get("acd").and_then(|v| v.as_f64()) {
+                metrics.average_component_dependency = acd;
+            }
+
+            if let Some(nccd) = graph_info.get("nccd").and_then(|v| v.as_f64()) {
+                metrics.normalized_ccd = nccd;
+            }
+
+            if let Some(total_sloc) = graph_info.get("totalSloc").and_then(|v| v.as_u64()) {
+                metrics.total_sloc = total_sloc as u32;
+            }
+
+            if let Some(avg_sloc) = graph_info.get("averageSloc").and_then(|v| v.as_f64()) {
+                metrics.average_sloc = avg_sloc;
+            }
+
+            // Parse cycles if present
+            if let Some(cycles) = graph_info.get("cycles").and_then(|c| c.as_array()) {
+                for cycle in cycles {
+                    if let Some(cycle_nodes) = cycle.as_array() {
+                        let cycle_path: Vec<String> = cycle_nodes
+                            .iter()
+                            .filter_map(|n| n.as_str())
+                            .map(|s| s.to_string())
+                            .collect();
+                        if !cycle_path.is_empty() {
+                            metrics.detected_cycles.push(cycle_path);
+                        }
+                    }
+                }
+            }
+
+            // Parse orphan nodes if present
+            if let Some(orphans) = graph_info.get("orphans").and_then(|o| o.as_array()) {
+                metrics.orphan_libraries = orphans
+                    .iter()
+                    .filter_map(|o| o.as_str())
+                    .map(|s| s.to_string())
+                    .collect();
+            }
+        }
+
+        println!("🔍 DEBUG: Parsed global metrics - nodes: {}, edges: {}, acyclic: {}",
+                metrics.num_nodes, metrics.num_edges, metrics.is_acyclic);
+
+        Ok(metrics)
+    }
+
+    /// Parse node-level metrics from Lakos JSON nodes object
+    fn parse_node_metrics(&self, nodes: &serde_json::Map<String, Value>, project_path: &Path) -> Result<HashMap<String, NodeMetrics>> {
+        let mut node_metrics = HashMap::new();
+
+        for (library_name, node_data) in nodes {
+            let file_path = match self.library_name_to_file_path(library_name, project_path) {
+                Ok(path) => path.to_string_lossy().to_string(),
+                Err(_) => library_name.clone(), // Use library name as fallback
+            };
+
+            let mut metrics = NodeMetrics {
+                file_path: file_path.clone(),
+                ..Default::default()
+            };
+
+            // Parse metrics from node data
+            if let Some(cd) = node_data.get("cd").and_then(|v| v.as_u64()) {
+                metrics.component_dependency = cd as u32;
+            }
+
+            if let Some(in_deg) = node_data.get("inDegree").and_then(|v| v.as_u64()) {
+                metrics.in_degree = in_deg as u32;
+            }
+
+            if let Some(out_deg) = node_data.get("outDegree").and_then(|v| v.as_u64()) {
+                metrics.out_degree = out_deg as u32;
+            }
+
+            // Calculate instability: out_degree / (in_degree + out_degree)
+            let total_degree = metrics.in_degree + metrics.out_degree;
+            if total_degree > 0 {
+                metrics.instability = metrics.out_degree as f64 / total_degree as f64;
+            }
+
+            if let Some(sloc) = node_data.get("sloc").and_then(|v| v.as_u64()) {
+                metrics.sloc = sloc as u32;
+            }
+
+            // Determine if node is orphan
+            metrics.is_orphan = metrics.in_degree == 0 && metrics.out_degree == 0;
+
+            // Check if in cycle (would need cycle detection logic)
+            if let Some(in_cycle) = node_data.get("inCycle").and_then(|v| v.as_bool()) {
+                metrics.in_cycle = in_cycle;
+            }
+
+            if let Some(cycle_id) = node_data.get("cycleId").and_then(|v| v.as_u64()) {
+                metrics.cycle_id = Some(cycle_id as u32);
+            }
+
+            node_metrics.insert(file_path, metrics);
+        }
+
+        println!("🔍 DEBUG: Parsed {} node metrics", node_metrics.len());
+        Ok(node_metrics)
+    }
+
+    /// Parse lakos JSON output into RawDependency objects (backward compatibility)
+    fn parse_lakos_json(&self, json_str: &str, project_path: &Path) -> Result<Vec<RawDependency>> {
+        let (dependencies, _, _) = self.parse_lakos_json_enhanced(json_str, project_path)?;
+        Ok(dependencies)
+    }
+
     /// Convert lakos library name back to file path
     /// Lakos uses library names like "lib/src/widgets/button.dart" or "/lib/config/dependencies.dart"
     fn library_name_to_file_path(&self, library_name: &str, project_path: &Path) -> Result<PathBuf> {
@@ -494,16 +638,25 @@ impl DependencyAnalyzer for LakosAnalyzer {
         // Run lakos analysis
         let json_output = self.run_lakos(project_path, config)?;
         println!("🔍 DEBUG: run_lakos returned successfully, JSON length: {} chars", json_output.len());
-        println!("🔍 DEBUG: About to call parse_lakos_json");
-        
-        // Parse dependencies
-        let dependencies = self.parse_lakos_json(&json_output, project_path)
+        println!("🔍 DEBUG: About to call enhanced JSON parsing");
+
+        // Parse enhanced dependencies and metrics
+        let (dependencies, global_metrics, node_metrics) = self.parse_lakos_json_enhanced(&json_output, project_path)
             .context("Failed to parse Lakos output")?;
-        println!("🔍 DEBUG: parse_lakos_json completed successfully, found {} dependencies", dependencies.len());
+        println!("🔍 DEBUG: Enhanced parsing completed - found {} dependencies", dependencies.len());
+
+        if let Some(ref global) = global_metrics {
+            println!("🔍 DEBUG: Global metrics - nodes: {}, edges: {}, SLOC: {}",
+                    global.num_nodes, global.num_edges, global.total_sloc);
+        }
+
+        if let Some(ref nodes) = node_metrics {
+            println!("🔍 DEBUG: Node metrics for {} files", nodes.len());
+        }
         
         let analysis_duration = start_time.elapsed();
-        
-        // Create metrics
+
+        // Create basic metrics
         let metrics = AnalysisMetrics {
             total_files_found: dart_files.len(),
             files_analyzed: dart_files.len(), // Lakos analyzes all found Dart files
@@ -511,9 +664,21 @@ impl DependencyAnalyzer for LakosAnalyzer {
             dependencies_found: dependencies.len(),
             analysis_duration_ms: analysis_duration.as_millis() as u64,
         };
-        
-        Ok(AnalysisResult {
+
+        // Convert raw dependencies to enhanced dependencies
+        let enhanced_dependencies: Vec<EnhancedDependency> = dependencies
+            .iter()
+            .cloned()
+            .map(EnhancedDependency::from)
+            .collect();
+
+        // Create enhanced analysis result
+        let mut result = AnalysisResult {
             dependencies,
+            enhanced_dependencies: Some(enhanced_dependencies),
+            global_metrics: global_metrics.clone(),
+            node_metrics: node_metrics.clone(),
+            architecture_quality_score: None,
             analyzer_name: self.name().to_string(),
             analyzer_version: self.version().to_string(),
             analysis_timestamp: chrono::Utc::now().timestamp(),
@@ -522,7 +687,15 @@ impl DependencyAnalyzer for LakosAnalyzer {
             skipped_files: Vec::new(),
             metrics,
             issues,
-        })
+        };
+
+        // Calculate quality score based on metrics
+        result.calculate_quality_score();
+
+        println!("🔍 DEBUG: Enhanced analysis result created with quality score: {:?}",
+                result.architecture_quality_score);
+
+        Ok(result)
     }
     
     fn can_analyze_project(&self, project_path: &Path) -> bool {

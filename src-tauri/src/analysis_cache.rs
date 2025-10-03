@@ -453,6 +453,10 @@ mod tests {
                     metadata: HashMap::new(),
                 }
             ],
+            enhanced_dependencies: None,
+            global_metrics: None,
+            node_metrics: None,
+            architecture_quality_score: None,
             analyzer_name: "test".to_string(),
             analyzer_version: "1.0.0".to_string(),
             analysis_timestamp: 1234567890,

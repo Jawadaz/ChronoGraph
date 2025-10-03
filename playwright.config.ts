@@ -16,7 +16,7 @@ export default defineConfig({
     ['json', { outputFile: 'test-results/results.json' }]
   ],
   use: {
-    baseURL: 'http://localhost:1423',
+    baseURL: 'http://localhost:1429',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -58,8 +58,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'npm run dev -- --port 1423',
-    port: 1423,
+    command: 'npm run dev -- --port 1429',
+    port: 1429,
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
   },

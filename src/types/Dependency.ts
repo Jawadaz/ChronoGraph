@@ -1,6 +1,2 @@
-export interface Dependency {
-  source_file: string;
-  target_file: string;
-  relationship_type: string;
-  weight?: any;
-}
+// Re-export from comprehensive analysis types
+export * from './AnalysisTypes';

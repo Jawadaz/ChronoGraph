@@ -91,10 +91,25 @@ pub enum PerformanceTier {
     Slow,      // Full semantic analysis
 }
 
-/// Result from dependency analysis
+/// Enhanced result from dependency analysis with full Lakos metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
+    // Basic Dependencies (backward compatibility)
     pub dependencies: Vec<RawDependency>,
+
+    // Enhanced Dependencies with Lakos metrics
+    pub enhanced_dependencies: Option<Vec<EnhancedDependency>>,
+
+    // Global Architectural Metrics
+    pub global_metrics: Option<GlobalArchitecturalMetrics>,
+
+    // Node-level metrics keyed by file path
+    pub node_metrics: Option<HashMap<String, NodeMetrics>>,
+
+    // Architecture quality score (derived from metrics)
+    pub architecture_quality_score: Option<f64>,
+
+    // Existing fields
     pub analyzer_name: String,
     pub analyzer_version: String,
     pub analysis_timestamp: i64,
@@ -116,6 +131,221 @@ pub struct AnalysisMetrics {
     pub files_skipped: usize,
     pub dependencies_found: usize,
     pub analysis_duration_ms: u64,
+}
+
+/// Global architectural metrics from Lakos analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalArchitecturalMetrics {
+    // Structural Properties
+    pub is_acyclic: bool,
+    pub num_nodes: u32,
+    pub num_edges: u32,
+    pub avg_degree: f64,
+
+    // Coupling Metrics
+    pub cumulative_component_dependency: u32,  // CCD
+    pub average_component_dependency: f64,     // ACD
+    pub normalized_ccd: f64,                   // NCCD
+
+    // Code Volume
+    pub total_sloc: u32,
+    pub average_sloc: f64,
+
+    // Quality Indicators
+    pub detected_cycles: Vec<Vec<String>>,     // Cycle paths
+    pub orphan_libraries: Vec<String>,         // Isolated nodes
+}
+
+impl Default for GlobalArchitecturalMetrics {
+    fn default() -> Self {
+        Self {
+            is_acyclic: true,
+            num_nodes: 0,
+            num_edges: 0,
+            avg_degree: 0.0,
+            cumulative_component_dependency: 0,
+            average_component_dependency: 0.0,
+            normalized_ccd: 0.0,
+            total_sloc: 0,
+            average_sloc: 0.0,
+            detected_cycles: Vec::new(),
+            orphan_libraries: Vec::new(),
+        }
+    }
+}
+
+/// Node-level metrics from Lakos analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeMetrics {
+    pub file_path: String,
+
+    // Dependency Metrics
+    pub component_dependency: u32,            // CD - transitive dependents
+    pub in_degree: u32,                       // Direct dependents
+    pub out_degree: u32,                      // Direct dependencies
+    pub instability: f64,                     // out_degree / (in_degree + out_degree)
+
+    // Code Metrics
+    pub sloc: u32,                           // Source Lines of Code
+
+    // Derived Properties
+    pub is_orphan: bool,                     // No dependencies in either direction
+    pub in_cycle: bool,                      // Part of dependency cycle
+    pub cycle_id: Option<u32>,               // Which cycle (if multiple)
+}
+
+impl Default for NodeMetrics {
+    fn default() -> Self {
+        Self {
+            file_path: String::new(),
+            component_dependency: 0,
+            in_degree: 0,
+            out_degree: 0,
+            instability: 0.0,
+            sloc: 0,
+            is_orphan: false,
+            in_cycle: false,
+            cycle_id: None,
+        }
+    }
+}
+
+/// Enhanced dependency with additional Lakos metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancedDependency {
+    pub source_file: PathBuf,
+    pub target_file: PathBuf,
+    pub relationship_type: RelationshipType,
+    pub weight: DependencyWeight,
+    pub line_number: Option<u32>,
+    pub import_statement: Option<String>,
+    pub symbols: Vec<String>,
+    pub metadata: HashMap<String, String>,
+
+    // Lakos Enhancements
+    pub is_critical: bool,                   // Part of shortest path between key components
+    pub creates_cycle: bool,                 // Removing this edge breaks a cycle
+    pub coupling_strength: f64,              // Contribution to CCD
+}
+
+impl From<RawDependency> for EnhancedDependency {
+    fn from(raw: RawDependency) -> Self {
+        Self {
+            source_file: raw.source_file,
+            target_file: raw.target_file,
+            relationship_type: raw.relationship_type,
+            weight: raw.weight,
+            line_number: raw.line_number,
+            import_statement: raw.import_statement,
+            symbols: raw.symbols,
+            metadata: raw.metadata,
+            is_critical: false,
+            creates_cycle: false,
+            coupling_strength: 0.0,
+        }
+    }
+}
+
+impl AnalysisResult {
+    /// Calculate a composite architecture quality score from Lakos metrics
+    pub fn calculate_quality_score(&mut self) {
+        if let Some(global_metrics) = &self.global_metrics {
+            let mut score = 100.0; // Start with perfect score
+
+            // Penalize for cycles (major architectural issue)
+            if !global_metrics.is_acyclic {
+                score -= 30.0;
+                score -= (global_metrics.detected_cycles.len() as f64) * 5.0;
+            }
+
+            // Penalize for high coupling (NCCD > 0.5 is concerning)
+            if global_metrics.normalized_ccd > 0.5 {
+                score -= (global_metrics.normalized_ccd - 0.5) * 40.0;
+            }
+
+            // Penalize for orphan libraries (indicates poor architecture)
+            score -= (global_metrics.orphan_libraries.len() as f64) * 2.0;
+
+            // Bonus for good average instability (around 0.5 is ideal)
+            if let Some(node_metrics) = &self.node_metrics {
+                let instabilities: Vec<f64> = node_metrics.values()
+                    .map(|nm| nm.instability)
+                    .filter(|i| *i > 0.0) // Filter out zero instabilities
+                    .collect();
+
+                if !instabilities.is_empty() {
+                    let avg_instability = instabilities.iter().sum::<f64>() / instabilities.len() as f64;
+                    let instability_deviation = (avg_instability - 0.5).abs();
+                    score += (0.2 - instability_deviation.min(0.2)) * 25.0; // Bonus for good balance
+                }
+            }
+
+            // Ensure score is between 0 and 100
+            self.architecture_quality_score = Some(score.max(0.0).min(100.0));
+        }
+    }
+
+    /// Get enhanced dependencies, falling back to basic dependencies
+    pub fn get_dependencies(&self) -> &[RawDependency] {
+        &self.dependencies
+    }
+
+    /// Get enhanced dependencies if available
+    pub fn get_enhanced_dependencies(&self) -> Option<&[EnhancedDependency]> {
+        self.enhanced_dependencies.as_deref()
+    }
+
+    /// Check if this result includes enhanced Lakos metrics
+    pub fn has_enhanced_metrics(&self) -> bool {
+        self.global_metrics.is_some() && self.node_metrics.is_some()
+    }
+}
+
+impl NodeMetrics {
+    /// Calculate architectural role based on metrics
+    pub fn architectural_role(&self) -> &'static str {
+        if self.is_orphan {
+            "orphan"
+        } else if self.in_cycle {
+            "cyclic"
+        } else if self.in_degree == 0 && self.out_degree > 0 {
+            "leaf"
+        } else if self.in_degree > 5 && self.out_degree < 2 {
+            "core"
+        } else if self.in_degree > 2 && self.out_degree > 2 {
+            "connector"
+        } else {
+            "component"
+        }
+    }
+
+    /// Assess coupling level based on component dependency
+    pub fn coupling_level(&self) -> &'static str {
+        if self.component_dependency == 0 {
+            "isolated"
+        } else if self.component_dependency < 3 {
+            "low"
+        } else if self.component_dependency < 8 {
+            "medium"
+        } else {
+            "high"
+        }
+    }
+
+    /// Stability assessment based on instability metric
+    pub fn stability_assessment(&self) -> &'static str {
+        if self.instability < 0.2 {
+            "very_stable"
+        } else if self.instability < 0.4 {
+            "stable"
+        } else if self.instability < 0.6 {
+            "balanced"
+        } else if self.instability < 0.8 {
+            "unstable"
+        } else {
+            "very_unstable"
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

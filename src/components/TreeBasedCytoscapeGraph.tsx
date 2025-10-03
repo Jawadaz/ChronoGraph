@@ -3,7 +3,7 @@ import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
 import fcose from 'cytoscape-fcose';
 
-import { Dependency } from '../types/Dependency';
+import { Dependency, AnalysisResult, hasEnhancedMetrics, getNodeMetrics, calculateVisualEncoding, VisualEncodingConfig } from '../types/Dependency';
 import { TreeNode } from '../utils/treeStructure';
 import { transformToTreeBasedGraphElements } from '../utils/treeBasedGraphTransforms';
 import { GraphSettings } from './GraphSettings';
@@ -16,6 +16,8 @@ cytoscape.use(fcose);
 interface TreeBasedCytoscapeGraphProps {
   dependencies: Dependency[];
   treeNodes: Map<string, TreeNode>;
+  analysisResult?: AnalysisResult;
+  visualEncodingConfig?: VisualEncodingConfig;
   onNodeSelect?: (nodeId: string) => void;
   onEdgeDoubleClick?: (sourceId: string, targetId: string, relationshipTypes: string[]) => void;
 }
@@ -23,6 +25,15 @@ interface TreeBasedCytoscapeGraphProps {
 export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = ({
   dependencies,
   treeNodes,
+  analysisResult,
+  visualEncodingConfig = {
+    enable_size_encoding: true,
+    enable_color_encoding: true,
+    size_scaling_factor: 1.0,
+    color_intensity: 1.0,
+    highlight_orphans: true,
+    highlight_cycles: true
+  },
   onNodeSelect,
   onEdgeDoubleClick
 }) => {
@@ -36,7 +47,6 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
   // Initialize Cytoscape
   useEffect(() => {
     if (!containerRef.current || isInitialized) return;
-
     const cy = cytoscape({
       container: containerRef.current,
 
@@ -201,9 +211,24 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       totalEdges: weights.length
     });
 
+    // Calculate enhanced sizes if we have enhanced metrics
+    const hasEnhanced = hasEnhancedMetrics(analysisResult || {} as AnalysisResult);
+    console.log('🔍 Size encoding check:', {
+      hasEnhanced,
+      nodeCount,
+      analysisResult: !!analysisResult,
+      globalMetrics: analysisResult?.global_metrics,
+      nodeMetricsCount: analysisResult?.node_metrics ? Object.keys(analysisResult.node_metrics).length : 0
+    });
+
+    const enhancedSizes = hasEnhanced
+      ? calculateEnhancedSizes(calculateSizes(nodeCount), analysisResult, visualEncodingConfig)
+      : calculateSizes(nodeCount);
+
+    console.log('📏 Size calculation result:', enhancedSizes);
+
     // Update styles with dynamic sizing and weight mapping
-    const currentSizes = calculateSizes(nodeCount);
-    cyRef.current.style(getTreeBasedCytoscapeStyles(currentSizes, weightRange));
+    cyRef.current.style(getTreeBasedCytoscapeStyles(enhancedSizes, weightRange, analysisResult, visualEncodingConfig));
 
     // Update Cytoscape with new elements
     cyRef.current.elements().remove();
@@ -249,8 +274,13 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
         max: Math.max(...weights)
       } : { min: 1, max: 1 };
 
+      // Calculate enhanced sizes if we have enhanced metrics
+      const enhancedSizes = hasEnhancedMetrics(analysisResult || {} as AnalysisResult)
+        ? calculateEnhancedSizes(sizes, analysisResult, visualEncodingConfig)
+        : sizes;
+
       // Update styles with new sizes and current weight range
-      const newStyles = getTreeBasedCytoscapeStyles(sizes, weightRange);
+      const newStyles = getTreeBasedCytoscapeStyles(enhancedSizes, weightRange, analysisResult, visualEncodingConfig);
       cyRef.current.style(newStyles);
 
       // Force a re-layout with new layout parameters
@@ -283,6 +313,12 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
   );
   const currentNodeCount = currentElements.elements.filter(el => el.group === 'nodes').length;
 
+  console.log('🎯 TreeBasedCytoscapeGraph RENDERING with enhanced metrics:', {
+    hasEnhanced: hasEnhancedMetrics(analysisResult || {} as AnalysisResult),
+    dependencies: dependencies.length,
+    treeNodes: treeNodes.size
+  });
+
   return (
     <div className={`tree-based-cytoscape-container ${isSettingsCollapsed ? 'settings-collapsed' : ''}`}>
       <div className="graph-content">
@@ -292,14 +328,27 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
           style={{
             width: '100%',
             height: '100%',
-            border: '1px solid #e2e8f0',
+            border: '3px solid #ff0000',
             borderRadius: '8px',
-            background: '#ffffff'
+            background: '#ffeeee'
           }}
         />
+        <div style={{
+          position: 'absolute',
+          top: '10px',
+          left: '10px',
+          background: 'red',
+          color: 'white',
+          padding: '5px',
+          borderRadius: '4px',
+          fontSize: '12px',
+          zIndex: 1000
+        }}>
+          TreeBasedCytoscapeGraph Active
+        </div>
         {!isInitialized && (
           <div className="graph-loading">
-            🔄 Initializing graph...
+            🔄 Initializing Cytoscape graph...
           </div>
         )}
         {isSettingsCollapsed && (
@@ -486,11 +535,220 @@ const calculateDynamicWidth = (weight: number, minWeight: number, maxWeight: num
 };
 
 /**
+ * Calculate enhanced node sizes based on SLOC metrics
+ */
+const calculateEnhancedSizes = (
+  baseSizes: { fileSize: number; folderWidth: number; folderHeight: number; fontSize: number },
+  analysisResult: AnalysisResult,
+  config: VisualEncodingConfig
+) => {
+  if (!hasEnhancedMetrics(analysisResult) || !config.enable_size_encoding) {
+    return baseSizes;
+  }
+
+  const { global_metrics, node_metrics } = analysisResult;
+
+  // Calculate average SLOC for scaling
+  const avgSloc = global_metrics.average_sloc || 100; // Fallback if not available
+
+  return {
+    ...baseSizes,
+    // Base sizes will be scaled per-node in the styles
+    avgSloc,
+    scalingFactor: config.size_scaling_factor
+  };
+};
+
+/**
+ * Get enhanced node color based on metrics
+ */
+const getEnhancedNodeColor = (
+  filePath: string,
+  analysisResult?: AnalysisResult,
+  config?: VisualEncodingConfig
+): string => {
+  if (!analysisResult || !hasEnhancedMetrics(analysisResult) || !config?.enable_color_encoding) {
+    return '#64748b'; // Default gray
+  }
+
+  const nodeMetrics = getNodeMetrics(analysisResult, filePath);
+  if (!nodeMetrics) {
+    return '#64748b'; // Default gray if no metrics
+  }
+
+  // Calculate visual encoding
+  const encoding = calculateVisualEncoding(nodeMetrics, analysisResult.global_metrics, config);
+
+  // Convert HSL to hex color
+  const hue = encoding.color_hue;
+  const saturation = 70; // Keep saturation consistent
+  const lightness = encoding.is_orphan ? 30 : (encoding.in_cycle ? 40 : 50);
+
+  return hslToHex(hue, saturation, lightness);
+};
+
+/**
+ * Convert HSL to hex color
+ */
+const hslToHex = (h: number, s: number, l: number): string => {
+  const hNorm = h / 360;
+  const sNorm = s / 100;
+  const lNorm = l / 100;
+
+  const c = (1 - Math.abs(2 * lNorm - 1)) * sNorm;
+  const x = c * (1 - Math.abs((hNorm * 6) % 2 - 1));
+  const m = lNorm - c / 2;
+
+  let r, g, b;
+  if (hNorm < 1/6) { r = c; g = x; b = 0; }
+  else if (hNorm < 2/6) { r = x; g = c; b = 0; }
+  else if (hNorm < 3/6) { r = 0; g = c; b = x; }
+  else if (hNorm < 4/6) { r = 0; g = x; b = c; }
+  else if (hNorm < 5/6) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+
+  const toHex = (n: number) => Math.round((n + m) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+/**
+ * Calculate total SLOC for all files within a folder
+ */
+const calculateFolderSLOC = (
+  folderPath: string,
+  analysisResult: AnalysisResult
+): number => {
+  if (!analysisResult.node_metrics) return 0;
+
+  let totalSLOC = 0;
+  for (const [filePath, metrics] of Object.entries(analysisResult.node_metrics)) {
+    // Check if file is within the folder
+    if (filePath.startsWith(folderPath + '/')) {
+      totalSLOC += metrics.sloc || 0;
+    }
+  }
+  return totalSLOC;
+};
+
+/**
+ * Fallback: Calculate approximate folder size based on file count when enhanced metrics aren't available
+ */
+const calculateFolderSizeFallback = (
+  folderPath: string,
+  analysisResult: AnalysisResult
+): number => {
+  if (!analysisResult.analyzed_files) return 0;
+
+  let fileCount = 0;
+  for (const filePath of analysisResult.analyzed_files) {
+    const pathStr = typeof filePath === 'string' ? filePath : filePath.toString();
+    // Check if file is within the folder
+    if (pathStr.startsWith(folderPath + '/')) {
+      fileCount++;
+    }
+  }
+
+  // Approximate SLOC based on file count (rough estimate: 100 SLOC per file)
+  return fileCount * 100;
+};
+
+/**
+ * Get enhanced node size based on SLOC (for files) or total folder contents SLOC (for folders)
+ */
+const getEnhancedNodeSize = (
+  filePath: string,
+  baseSize: number,
+  analysisResult?: AnalysisResult,
+  config?: VisualEncodingConfig
+): number => {
+  if (!analysisResult || !config?.enable_size_encoding) {
+    return baseSize;
+  }
+
+  // Debug enhanced metrics availability for real repos
+  if (!hasEnhancedMetrics(analysisResult)) {
+    // Log what's missing only once per analysis to avoid spam
+    if (typeof (window as any).__enhanced_metrics_debug_logged === 'undefined') {
+      console.log('❌ Enhanced metrics not available:', {
+        hasEnhancedDependencies: !!analysisResult.enhanced_dependencies,
+        enhancedDependenciesLength: analysisResult.enhanced_dependencies?.length || 0,
+        hasGlobalMetrics: !!analysisResult.global_metrics,
+        hasNodeMetrics: !!analysisResult.node_metrics,
+        nodeMetricsCount: analysisResult.node_metrics ? Object.keys(analysisResult.node_metrics).length : 0,
+        hasArchitectureScore: analysisResult.architecture_quality_score !== undefined,
+        analyzerName: (analysisResult as any).analyzer_name || 'unknown'
+      });
+      (window as any).__enhanced_metrics_debug_logged = true;
+    }
+    return baseSize;
+  }
+
+  // Try to get direct file metrics first
+  let nodeMetrics = getNodeMetrics(analysisResult, filePath);
+  let totalSLOC = 0;
+
+  if (nodeMetrics) {
+    // It's a file with direct metrics
+    totalSLOC = nodeMetrics.sloc || 0;
+  } else {
+    // It might be a folder - calculate total SLOC of contents
+    if (hasEnhancedMetrics(analysisResult)) {
+      // Use precise SLOC calculation when available
+      totalSLOC = calculateFolderSLOC(filePath, analysisResult);
+    } else {
+      // Use fallback estimation when enhanced metrics aren't available
+      totalSLOC = calculateFolderSizeFallback(filePath, analysisResult);
+
+      // Debug fallback calculation
+      if (totalSLOC > 0 && filePath.includes('/') && !filePath.includes('.')) {
+        console.log(`📁 Fallback folder sizing: ${filePath} = ${totalSLOC} estimated SLOC`);
+      }
+    }
+
+    // If no SLOC found, return base size
+    if (totalSLOC === 0) {
+      return baseSize;
+    }
+
+    // Create synthetic metrics for folder visualization
+    nodeMetrics = {
+      sloc: totalSLOC,
+      instability: 0.5, // Default instability for folders
+      incoming_dependencies: 0,
+      outgoing_dependencies: 0,
+      component_dependency_count: 0
+    };
+  }
+
+  // Calculate visual encoding
+  let encoding;
+  if (hasEnhancedMetrics(analysisResult) && analysisResult.global_metrics) {
+    // Use precise visual encoding when available
+    encoding = calculateVisualEncoding(nodeMetrics, analysisResult.global_metrics, config);
+  } else {
+    // Fallback: simple size calculation based on relative SLOC
+    const avgSLOC = 100; // Default average when no global metrics available
+    const sizeFactor = Math.sqrt(nodeMetrics.sloc / avgSLOC) * (config.size_scaling_factor || 1.0);
+    const boundedSizeFactor = Math.max(0.5, Math.min(2.0, sizeFactor));
+
+    encoding = {
+      size_factor: boundedSizeFactor,
+      color_factor: 0.5 // Default neutral color
+    };
+  }
+
+  const enhancedSize = Math.round(baseSize * encoding.size_factor);
+  return enhancedSize;
+};
+
+/**
  * Cytoscape.js styles optimized for tree-based graph visualization with dynamic sizing and weight mapping
  */
 const getTreeBasedCytoscapeStyles = (
-  sizes: { fileSize: number; folderWidth: number; folderHeight: number; fontSize: number },
-  weightRange?: { min: number; max: number }
+  sizes: { fileSize: number; folderWidth: number; folderHeight: number; fontSize: number; avgSloc?: number; scalingFactor?: number },
+  weightRange?: { min: number; max: number },
+  analysisResult?: AnalysisResult,
+  visualEncodingConfig?: VisualEncodingConfig
 ) => {
 
   return [
@@ -499,11 +757,40 @@ const getTreeBasedCytoscapeStyles = (
     selector: 'node[type="file"]',
     style: {
       'shape': 'ellipse',
-      'width': `${sizes.fileSize}px`,
-      'height': `${sizes.fileSize}px`,
-      'background-color': (ele: any) => getNodeColor(ele.data('instability')),
-      'border-width': '2px',
-      'border-color': '#64748b',
+      'width': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        return getEnhancedNodeSize(filePath, sizes.fileSize, analysisResult, visualEncodingConfig);
+      },
+      'height': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        return getEnhancedNodeSize(filePath, sizes.fileSize, analysisResult, visualEncodingConfig);
+      },
+      'background-color': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        return getEnhancedNodeColor(filePath, analysisResult, visualEncodingConfig);
+      },
+      'border-width': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        const nodeMetrics = analysisResult && hasEnhancedMetrics(analysisResult)
+          ? getNodeMetrics(analysisResult, filePath)
+          : null;
+
+        // Thicker border for orphans and nodes in cycles
+        if (nodeMetrics && visualEncodingConfig?.highlight_orphans && nodeMetrics.is_orphan) return '4px';
+        if (nodeMetrics && visualEncodingConfig?.highlight_cycles && nodeMetrics.in_cycle) return '4px';
+        return '2px';
+      },
+      'border-color': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        const nodeMetrics = analysisResult && hasEnhancedMetrics(analysisResult)
+          ? getNodeMetrics(analysisResult, filePath)
+          : null;
+
+        // Special border colors for problematic nodes
+        if (nodeMetrics && visualEncodingConfig?.highlight_orphans && nodeMetrics.is_orphan) return '#ef4444'; // Red for orphans
+        if (nodeMetrics && visualEncodingConfig?.highlight_cycles && nodeMetrics.in_cycle) return '#f59e0b'; // Orange for cycles
+        return '#64748b';
+      },
       'label': 'data(label)',
       'font-size': `${sizes.fontSize}px`,
       'text-valign': 'center',
@@ -520,11 +807,40 @@ const getTreeBasedCytoscapeStyles = (
     selector: 'node[type="folder"].leaf',
     style: {
       'shape': 'round-rectangle',
-      'width': `${sizes.folderWidth}px`,
-      'height': `${sizes.folderHeight}px`,
-      'background-color': (ele: any) => getNodeColor(ele.data('instability')),
-      'border-width': '3px',
-      'border-color': '#f59e0b',
+      'width': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        return getEnhancedNodeSize(filePath, sizes.folderWidth, analysisResult, visualEncodingConfig);
+      },
+      'height': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        return getEnhancedNodeSize(filePath, sizes.folderHeight, analysisResult, visualEncodingConfig);
+      },
+      'background-color': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        return getEnhancedNodeColor(filePath, analysisResult, visualEncodingConfig);
+      },
+      'border-width': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        const nodeMetrics = analysisResult && hasEnhancedMetrics(analysisResult)
+          ? getNodeMetrics(analysisResult, filePath)
+          : null;
+
+        // Thicker border for orphans and nodes in cycles
+        if (nodeMetrics && visualEncodingConfig?.highlight_orphans && nodeMetrics.is_orphan) return '5px';
+        if (nodeMetrics && visualEncodingConfig?.highlight_cycles && nodeMetrics.in_cycle) return '5px';
+        return '3px';
+      },
+      'border-color': (ele: any) => {
+        const filePath = ele.data('id') || ele.data('label');
+        const nodeMetrics = analysisResult && hasEnhancedMetrics(analysisResult)
+          ? getNodeMetrics(analysisResult, filePath)
+          : null;
+
+        // Special border colors for problematic nodes
+        if (nodeMetrics && visualEncodingConfig?.highlight_orphans && nodeMetrics.is_orphan) return '#ef4444'; // Red for orphans
+        if (nodeMetrics && visualEncodingConfig?.highlight_cycles && nodeMetrics.in_cycle) return '#dc2626'; // Darker red for cycles
+        return '#f59e0b';
+      },
       'border-style': 'solid',
       'label': 'data(label)',
       'font-size': `${sizes.fontSize}px`,
@@ -783,13 +1099,3 @@ const getTreeBasedCytoscapeStyles = (
 ];
 };
 
-/**
- * Get node color based on instability value
- */
-function getNodeColor(instability: number): string {
-  // Create a gradient from green (stable) to red (unstable)
-  if (instability < 0.3) return '#22c55e'; // Green
-  if (instability < 0.6) return '#eab308'; // Yellow
-  if (instability < 0.8) return '#f97316'; // Orange
-  return '#ef4444'; // Red
-}
