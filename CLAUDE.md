@@ -1,0 +1,1 @@
+- never use hardcoded assumptions about the code or the structure of the analyzed repo.
