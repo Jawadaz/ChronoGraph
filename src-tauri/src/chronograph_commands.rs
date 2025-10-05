@@ -41,6 +41,9 @@ pub async fn initialize_analysis(
             let normalized_subfolder = subfolder.replace('\\', "/");
             config.subfolder = Some(normalized_subfolder);
         }
+        if let Some(is_local) = options.get("is_local_path").and_then(|v| v.as_bool()) {
+            config.is_local_repository = is_local;
+        }
     }
     
     // Check if Lakos is available

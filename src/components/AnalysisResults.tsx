@@ -86,23 +86,37 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
   // Graph tab state
   const [selectedGraphNode, setSelectedGraphNode] = React.useState<string | null>(null);
   const [isTreePanelCollapsed, setIsTreePanelCollapsed] = React.useState(false);
-  const [treeNodes, setTreeNodes] = React.useState<Map<string, TreeNode>>(new Map());
-  const [treeRootId, setTreeRootId] = React.useState<string | null>(null);
 
-  // Build tree from dependencies when selected commit changes
-  React.useEffect(() => {
-    if (!selectedCommit) return;
+  // Build tree immediately from selected commit (using useMemo for synchronous initialization)
+  const projectTree = React.useMemo(() => {
+    if (!selectedCommit) {
+      return { nodes: new Map<string, TreeNode>(), rootId: null };
+    }
 
-    const projectTree = buildProjectTreeFromLakos(selectedCommit.analysis_result.dependencies);
-
-    setTreeNodes(projectTree.nodes);
-    setTreeRootId(projectTree.rootId);
+    const tree = buildProjectTreeFromLakos(selectedCommit.analysis_result.dependencies);
+    return tree;
   }, [selectedCommit]);
 
-  // Handle tree node checkbox changes
+  // Use useRef for stable tree reference - never recreated, only mutated in place
+  const treeNodesRef = React.useRef<Map<string, TreeNode>>(projectTree.nodes);
+  const [treeRootId, setTreeRootId] = React.useState<string | null>(projectTree.rootId);
+
+  // Version counter to trigger re-renders when tree state changes
+  const [treeVersion, setTreeVersion] = React.useState(0);
+
+  // Update ref when tree changes (happens when selectedCommit changes)
+  React.useEffect(() => {
+    treeNodesRef.current = projectTree.nodes;
+    setTreeRootId(projectTree.rootId);
+    setTreeVersion(v => v + 1);
+  }, [projectTree]);
+
+  // Handle tree node checkbox changes with in-place mutation
   const handleTreeCheckboxChange = (nodeId: string, newState: 'checked' | 'unchecked' | 'half-checked') => {
-    const updatedNodes = updateCheckboxState(nodeId, newState, treeNodes);
-    setTreeNodes(updatedNodes);
+    // Mutate the Map in place instead of creating a new one
+    updateCheckboxState(nodeId, newState, treeNodesRef.current);
+    // Increment version to trigger re-render
+    setTreeVersion(v => v + 1);
   };
 
   // Handle edge double-click for filtering
@@ -188,8 +202,9 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
             setSelectedGraphNode={setSelectedGraphNode}
             isTreePanelCollapsed={isTreePanelCollapsed}
             setIsTreePanelCollapsed={setIsTreePanelCollapsed}
-            treeNodes={treeNodes}
+            treeNodes={treeNodesRef.current}
             treeRootId={treeRootId}
+            treeVersion={treeVersion}
             handleTreeCheckboxChange={handleTreeCheckboxChange}
             handleEdgeDoubleClick={handleEdgeDoubleClick}
           />

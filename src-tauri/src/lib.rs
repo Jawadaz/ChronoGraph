@@ -20,6 +20,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(chronograph_commands::ChronoGraphState::default())
         .manage(chronograph_commands::ProgressState::default())
         .invoke_handler(tauri::generate_handler![

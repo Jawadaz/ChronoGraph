@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 
 // Check if we're in a Tauri environment
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
@@ -28,6 +29,7 @@ export const RepositorySelectionModal: React.FC<RepositorySelectionModalProps> =
 }) => {
   const [repoUrl, setRepoUrl] = useState('');
   const [subfolder, setSubfolder] = useState('');
+  const [isLocalFolder, setIsLocalFolder] = useState(false);
   const [lakosAvailable, setLakosAvailable] = useState<boolean | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [cachedRepos, setCachedRepos] = useState<CachedRepository[]>([]);
@@ -66,6 +68,29 @@ export const RepositorySelectionModal: React.FC<RepositorySelectionModalProps> =
     } catch (error) {
       console.error('Error checking Lakos availability:', error);
       setLakosAvailable(false);
+    }
+  };
+
+  const handleSelectLocalFolder = async () => {
+    if (!isTauri) {
+      alert('Local folder selection is only available in the desktop app');
+      return;
+    }
+
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Repository Folder'
+      });
+
+      if (selectedPath) {
+        setRepoUrl(selectedPath as string);
+        setIsLocalFolder(true);
+      }
+    } catch (error) {
+      console.error('Error selecting folder:', error);
+      alert(`Failed to select folder: ${error}`);
     }
   };
 
@@ -160,22 +185,53 @@ export const RepositorySelectionModal: React.FC<RepositorySelectionModalProps> =
           </div>
 
           <form onSubmit={handleSubmit} className="repo-form">
+            {/* Source Type Selector */}
+            <div className="source-type-selector">
+              <button
+                type="button"
+                className={`source-type-button ${!isLocalFolder ? 'active' : ''}`}
+                onClick={() => setIsLocalFolder(false)}
+                disabled={isAnalyzing}
+              >
+                🔗 Remote URL
+              </button>
+              <button
+                type="button"
+                className={`source-type-button ${isLocalFolder ? 'active' : ''}`}
+                onClick={() => setIsLocalFolder(true)}
+                disabled={isAnalyzing || !isTauri}
+              >
+                📁 Local Folder
+              </button>
+            </div>
+
             {/* Repository URL */}
             <div className="form-group">
               <label htmlFor="repo-url" className="form-label">
-                🔗 Repository URL
+                {isLocalFolder ? '📁 Local Repository Path' : '🔗 Repository URL'}
               </label>
               <div className="repo-input-container">
+                {isLocalFolder && (
+                  <button
+                    type="button"
+                    onClick={handleSelectLocalFolder}
+                    className="browse-button"
+                    disabled={isAnalyzing}
+                  >
+                    Browse...
+                  </button>
+                )}
                 <input
                   id="repo-url"
-                  type="url"
+                  type={isLocalFolder ? "text" : "url"}
                   value={repoUrl}
                   onChange={(e) => setRepoUrl(e.target.value)}
-                  onFocus={() => setShowDropdown(cachedRepos.length > 0)}
+                  onFocus={() => !isLocalFolder && setShowDropdown(cachedRepos.length > 0)}
                   onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
-                  placeholder="https://github.com/owner/repo"
+                  placeholder={isLocalFolder ? "C:\\path\\to\\repository" : "https://github.com/owner/repo"}
                   className="repo-input"
                   disabled={isAnalyzing}
+                  readOnly={isLocalFolder}
                   required
                   autoFocus
                 />
@@ -415,6 +471,65 @@ export const RepositorySelectionModal: React.FC<RepositorySelectionModalProps> =
             display: flex;
             flex-direction: column;
             gap: 20px;
+          }
+
+          .source-type-selector {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+          }
+
+          .source-type-button {
+            flex: 1;
+            padding: 10px 16px;
+            border: 2px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+          }
+
+          .source-type-button:hover:not(:disabled) {
+            border-color: #2563eb;
+            background: #eff6ff;
+          }
+
+          .source-type-button.active {
+            border-color: #2563eb;
+            background: #2563eb;
+            color: white;
+          }
+
+          .source-type-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+
+          .browse-button {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            padding: 6px 12px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            z-index: 10;
+          }
+
+          .browse-button:hover:not(:disabled) {
+            background: #1d4ed8;
+          }
+
+          .browse-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
           }
 
           .form-group {

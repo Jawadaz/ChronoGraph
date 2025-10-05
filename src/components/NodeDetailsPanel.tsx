@@ -155,6 +155,10 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
               <h4>📈 Lakos Metrics</h4>
               <div className="info-grid">
                 <div className="info-item">
+                  <span className="label">SLOC:</span>
+                  <span className="value highlight">{nodeMetrics.sloc.toLocaleString()}</span>
+                </div>
+                <div className="info-item">
                   <span className="label">Component Dependency:</span>
                   <span className="value">{nodeMetrics.component_dependency}</span>
                 </div>
@@ -166,6 +170,18 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                   <span className="label">Out-Degree:</span>
                   <span className="value">{nodeMetrics.out_degree}</span>
                 </div>
+                {('fan_in' in nodeMetrics) && (
+                  <div className="info-item">
+                    <span className="label">Fan-In:</span>
+                    <span className="value">{(nodeMetrics as any).fan_in}</span>
+                  </div>
+                )}
+                {('fan_out' in nodeMetrics) && (
+                  <div className="info-item">
+                    <span className="label">Fan-Out:</span>
+                    <span className="value">{(nodeMetrics as any).fan_out}</span>
+                  </div>
+                )}
                 <div className="info-item">
                   <span className="label">Instability:</span>
                   <span className={`value ${getInstabilityClass(nodeMetrics.instability)}`}>

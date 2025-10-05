@@ -50,6 +50,8 @@ pub struct ChronoGraphConfig {
     pub cleanup_after_analysis: bool,
     /// Optional subfolder to analyze (e.g., "samples/web/gallery")
     pub subfolder: Option<String>,
+    /// Whether the github_url is actually a local path
+    pub is_local_repository: bool,
 }
 
 impl Default for ChronoGraphConfig {
@@ -63,6 +65,7 @@ impl Default for ChronoGraphConfig {
             max_commits: Some(100), // Limit for initial testing
             cleanup_after_analysis: true,
             subfolder: None,
+            is_local_repository: false,
         }
     }
 }
@@ -216,22 +219,31 @@ impl ChronoGraphEngine {
     fn clone_and_setup(&mut self) -> Result<GitTemporalNavigator> {
         // Ensure local directory exists
         std::fs::create_dir_all(&self.config.local_base_dir)?;
-        
+
         // Clean up old timestamped repositories before cloning
         let _ = GitTemporalNavigator::cleanup_old_repos(&self.config.local_base_dir);
-        
-        let mut git_navigator = GitTemporalNavigator::clone_repository(
-            &self.config.github_url, 
-            &self.config.local_base_dir
-        )?;
-        
+
+        let mut git_navigator = if self.config.is_local_repository {
+            // For local repositories, clone to a temp location to avoid modifying user's working directory
+            GitTemporalNavigator::clone_local_repository(
+                &self.config.github_url,
+                &self.config.local_base_dir
+            )?
+        } else {
+            // For remote repositories, clone normally
+            GitTemporalNavigator::clone_repository(
+                &self.config.github_url,
+                &self.config.local_base_dir
+            )?
+        };
+
         // If we have a subfolder, rebuild merge sequence with filtering (normalize path separators)
         if let Some(ref subfolder) = self.config.subfolder {
             let normalized_subfolder = subfolder.replace('\\', "/");
             println!("Rebuilding merge sequence with subfolder filter: {} -> {}", subfolder, normalized_subfolder);
             git_navigator.build_merge_sequence_with_subfolder(Some(&normalized_subfolder))?;
         }
-        
+
         Ok(git_navigator)
     }
     

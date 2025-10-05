@@ -31,6 +31,70 @@ pub struct GitTemporalNavigator {
 }
 
 impl GitTemporalNavigator {
+    /// Clone a local repository to a temporary location for safe analysis
+    /// This prevents modifying the user's working directory
+    pub fn clone_local_repository(local_path: &str, local_base_dir: &Path) -> Result<Self> {
+        let source_path = PathBuf::from(local_path);
+
+        // Verify source path exists and is a git repository
+        if !source_path.exists() {
+            return Err(anyhow::anyhow!("Local path does not exist: {}", source_path.display()));
+        }
+
+        // Try to open as git repository to validate
+        Repository::open(&source_path)
+            .context(format!(
+                "Not a valid git repository at {}. Please select a folder that contains a .git directory.",
+                source_path.display()
+            ))?;
+
+        // Create a safe name for the cloned repository
+        let repo_name = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("local-repo");
+        let cache_path = local_base_dir.join(format!("{}-local-cache", repo_name));
+
+        // Ensure parent directory exists
+        if let Some(parent) = cache_path.parent() {
+            fs::create_dir_all(parent)
+                .context("Failed to create local repository directory")?;
+        }
+
+        println!("Cloning local repository from {} to {}", source_path.display(), cache_path.display());
+
+        // Clone the local repository to temp location
+        let repo = Repository::clone(
+            source_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?,
+            &cache_path
+        ).context("Failed to clone local repository")?;
+
+        // Get default branch name
+        let default_branch = {
+            let head = repo.head().context("Failed to get HEAD reference")?;
+            head.shorthand().unwrap_or("main").to_string()
+        };
+
+        let clone_info = RepoCloneInfo {
+            original_url: local_path.to_string(),
+            local_path: cache_path.clone(),
+            default_branch: default_branch.clone(),
+            clone_timestamp: chrono::Utc::now().timestamp(),
+        };
+
+        let mut navigator = Self {
+            repo,
+            clone_info,
+            merge_sequence: Vec::new(),
+            current_commit: None,
+        };
+
+        // Build merge sequence immediately
+        navigator.build_merge_sequence()?;
+
+        Ok(navigator)
+    }
+
     /// Clone repository from GitHub URL to local temporary directory (with caching)
     pub fn clone_repository(github_url: &str, local_base_dir: &Path) -> Result<Self> {
         let repo_name = Self::extract_repo_name(github_url)?;

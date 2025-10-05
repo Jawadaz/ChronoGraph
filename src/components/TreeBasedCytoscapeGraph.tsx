@@ -16,6 +16,7 @@ cytoscape.use(fcose);
 interface TreeBasedCytoscapeGraphProps {
   dependencies: Dependency[];
   treeNodes: Map<string, TreeNode>;
+  treeVersion?: number;
   analysisResult?: AnalysisResult;
   visualEncodingConfig?: VisualEncodingConfig;
   onNodeSelect?: (nodeId: string) => void;
@@ -28,6 +29,7 @@ interface TreeBasedCytoscapeGraphProps {
 export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = ({
   dependencies,
   treeNodes,
+  treeVersion,
   analysisResult,
   visualEncodingConfig = {
     enable_size_encoding: true,
@@ -287,7 +289,7 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       dynamicSizing: nodeCount > 20 ? 'enabled' : 'standard'
     });
 
-  }, [dependencies, treeNodes, forceUpdate]);
+  }, [dependencies, treeNodes, treeVersion, forceUpdate]);
 
   // Handle external hover from tree
   useEffect(() => {
@@ -370,7 +372,7 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
   // Calculate current node count for settings (memoized to avoid recalculation)
   const currentElements = useMemo(() =>
     transformToTreeBasedGraphElements(dependencies, treeNodes),
-    [dependencies, treeNodes]
+    [dependencies, treeNodes, treeVersion]
   );
   const currentNodeCount = currentElements.elements.filter(el => el.group === 'nodes').length;
 

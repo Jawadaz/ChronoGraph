@@ -1,1 +1,2 @@
 - never use hardcoded assumptions about the code or the structure of the analyzed repo.
+- use playwright to approach fixing and development with a TDD approach, so you have shorter feedback loop than to include a contiously manual test steps by me (the user).

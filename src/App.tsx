@@ -238,6 +238,9 @@ function App() {
     }
 
     try {
+      // Detect if this is a local path (starts with / or drive letter like C:\)
+      const isLocalPath = /^([A-Za-z]:[\\/]|\/|\\)/.test(repoUrl);
+
       // Initialize analysis (Tauri only)
       await invoke('initialize_analysis', {
         githubUrl: repoUrl,
@@ -245,7 +248,8 @@ function App() {
           commit_sampling: 5, // Every 5th commit
           max_commits: 50,    // Limit for demo
           analyzer: 'lakos',
-          subfolder: subfolder || null
+          subfolder: subfolder || null,
+          is_local_path: isLocalPath
         }
       });
 

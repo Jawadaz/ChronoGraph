@@ -42,6 +42,7 @@ interface GraphTabProps {
   setIsTreePanelCollapsed: (collapsed: boolean) => void;
   treeNodes: Map<string, TreeNode>;
   treeRootId: string | null;
+  treeVersion: number;
   handleTreeCheckboxChange: (nodeId: string, newState: 'checked' | 'unchecked' | 'half-checked') => void;
   handleEdgeDoubleClick: (sourceId: string, targetId: string, relationshipTypes: string[]) => void;
 }
@@ -54,6 +55,7 @@ export const GraphTab: React.FC<GraphTabProps> = ({
   setIsTreePanelCollapsed,
   treeNodes,
   treeRootId,
+  treeVersion,
   handleTreeCheckboxChange,
   handleEdgeDoubleClick
 }) => {
@@ -208,6 +210,7 @@ export const GraphTab: React.FC<GraphTabProps> = ({
           <TreeBasedCytoscapeGraph
             dependencies={selectedCommit.analysis_result.dependencies}
             treeNodes={treeNodes}
+            treeVersion={treeVersion}
             analysisResult={selectedCommit.analysis_result}
             visualEncodingConfig={{
               enable_size_encoding: true,

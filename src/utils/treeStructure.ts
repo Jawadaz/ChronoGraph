@@ -490,27 +490,25 @@ function setDescendantsUnchecked(nodeId: string, nodes: Map<string, TreeNode>): 
 
 /**
  * Update checkbox state and propagate changes up and down the tree
+ * IMPORTANT: Mutates the Map in place for stable reference pattern
  */
 export function updateCheckboxState(
   nodeId: string,
   newState: CheckboxState,
   nodes: Map<string, TreeNode>
-): Map<string, TreeNode> {
-  const updatedNodes = new Map(nodes);
-  const node = updatedNodes.get(nodeId);
+): void {
+  const node = nodes.get(nodeId);
 
-  if (!node) return updatedNodes;
+  if (!node) return;
 
   // Update current node
   node.checkboxState = newState;
 
   // Propagate down to children (all states now propagate correctly)
-  propagateDownward(nodeId, newState, updatedNodes);
+  propagateDownward(nodeId, newState, nodes);
 
   // Propagate up to parents (recalculate parent states based on all children)
-  propagateUpward(nodeId, updatedNodes);
-
-  return updatedNodes;
+  propagateUpward(nodeId, nodes);
 }
 
 /**
@@ -526,8 +524,7 @@ export function createHalfCheckedScenario(
 
   // Set the parent to half-checked (contracted view)
   // This will automatically make all children unchecked
-  const result = updateCheckboxState(parentId, 'half-checked', updatedNodes);
-  result.forEach((node, id) => updatedNodes.set(id, node));
+  updateCheckboxState(parentId, 'half-checked', updatedNodes);
 
   return updatedNodes;
 }
