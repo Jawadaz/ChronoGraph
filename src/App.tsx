@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { RepositorySelectionModal, AnalysisProgress, AnalysisResults, RepositoryManager } from './components'
+import { mockAnalysisSnapshots, mockStatistics } from './data/mockAnalysisData'
 
 // Check if we're running in Tauri or in web browser
 const isTauri = () => {
@@ -29,24 +30,46 @@ function App() {
           const currentProgress = await invoke('get_analysis_progress');
           setProgress(currentProgress);
 
-          // Simulate adding logs based on progress (this would come from backend in real implementation)
-          if (currentProgress && currentProgress.current_commit_hash) {
-            const newLogEntry = `Checking out commit: ${currentProgress.current_commit_hash}`;
-            setAnalysisLogs(prev => {
-              if (!prev.includes(newLogEntry)) {
-                return [...prev, newLogEntry];
-              }
-              return prev;
-            });
+          // Add progress messages to logs
+          if (currentProgress) {
+            // Add phase messages
+            if (currentProgress.message) {
+              const newLogEntry = `📋 ${currentProgress.message}`;
+              setAnalysisLogs(prev => {
+                if (!prev.includes(newLogEntry)) {
+                  return [...prev, newLogEntry];
+                }
+                return prev;
+              });
+            }
+
+            // Add commit checkout messages
+            if (currentProgress.current_commit_hash) {
+              const commitLogEntry = `🔄 Checking out commit: ${currentProgress.current_commit_hash.substring(0, 8)}`;
+              setAnalysisLogs(prev => {
+                if (!prev.includes(commitLogEntry)) {
+                  return [...prev, commitLogEntry];
+                }
+                return prev;
+              });
+            }
           }
 
           // Check if analysis is complete
           if (currentProgress && currentProgress.phase === 'Completed') {
             setIsAnalyzing(false);
             await fetchResults();
-          } else if (currentProgress && currentProgress.phase.includes('Failed')) {
+          } else if (currentProgress && (typeof currentProgress.phase === 'object' && currentProgress.phase.Failed)) {
+            // Handle Failed phase (which is an object like {Failed: "error message"})
+            setIsAnalyzing(false);
+            const errorMsg = currentProgress.phase.Failed || currentProgress.message || 'Unknown error';
+            setError('Analysis failed: ' + errorMsg);
+            console.error('❌ Analysis failed:', errorMsg);
+          } else if (currentProgress && typeof currentProgress.phase === 'string' && currentProgress.phase.includes('Failed')) {
+            // Fallback for string-based Failed phase
             setIsAnalyzing(false);
             setError('Analysis failed: ' + currentProgress.message);
+            console.error('❌ Analysis failed:', currentProgress.message);
           }
         } catch (err) {
           console.error('Error getting progress:', err);
@@ -62,131 +85,10 @@ function App() {
   const fetchResults = async () => {
     if (isWebVersion) {
       // In web version, show sample data with realistic Flutter/Dart structure
-      console.log('🌐 Web version: Generating sample data');
-      setSnapshots([
-        {
-          commit_hash: 'sample-web-commit',
-          timestamp: Date.now(),
-          commit_info: {
-            hash: 'sample-web-commit',
-            message: 'Sample Flutter/Dart project structure',
-            author: 'Web Demo',
-            timestamp: Date.now()
-          },
-          dependencies: [
-            // Main app structure
-            { source_file: 'lib/main.dart', target_file: 'lib/app.dart', relationship_type: 'imports', weight: 1 },
-            { source_file: 'lib/app.dart', target_file: 'lib/config/routes.dart', relationship_type: 'imports', weight: 1 },
-            { source_file: 'lib/app.dart', target_file: 'lib/config/theme.dart', relationship_type: 'imports', weight: 1 },
-
-            // Data layer
-            { source_file: 'lib/data/repositories/user_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 2 },
-            { source_file: 'lib/data/repositories/auth_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 3 },
-            { source_file: 'lib/data/services/api_service.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1 },
-
-            // UI layer
-            { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/ui/widgets/user_card.dart', relationship_type: 'imports', weight: 2 },
-            { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/data/repositories/user_repository.dart', relationship_type: 'imports', weight: 1 },
-            { source_file: 'lib/ui/screens/login_screen.dart', target_file: 'lib/data/repositories/auth_repository.dart', relationship_type: 'imports', weight: 1 },
-            { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1 },
-
-            // Utils and config
-            { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/home_screen.dart', relationship_type: 'imports', weight: 1 },
-            { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1 },
-            { source_file: 'lib/utils/validators.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1 },
-
-            // Cross-dependencies
-            { source_file: 'lib/data/models/user.dart', target_file: 'lib/utils/json_serializable.dart', relationship_type: 'implements', weight: 1 },
-            { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/ui/widgets/base_card.dart', relationship_type: 'extends', weight: 1 },
-          ],
-          analysis_result: {
-            analyzed_files: [
-              'lib/main.dart', 'lib/app.dart', 'lib/config/routes.dart', 'lib/config/theme.dart',
-              'lib/data/repositories/user_repository.dart', 'lib/data/repositories/auth_repository.dart',
-              'lib/data/services/api_service.dart', 'lib/data/models/user.dart', 'lib/ui/screens/home_screen.dart',
-              'lib/ui/screens/login_screen.dart', 'lib/ui/widgets/user_card.dart', 'lib/ui/widgets/base_card.dart',
-              'lib/config/routes.dart', 'lib/utils/validators.dart', 'lib/utils/json_serializable.dart'
-            ],
-            dependencies: [
-              { source_file: 'lib/main.dart', target_file: 'lib/app.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/app.dart', target_file: 'lib/config/routes.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/app.dart', target_file: 'lib/config/theme.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/data/repositories/user_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 2 },
-              { source_file: 'lib/data/repositories/auth_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 3 },
-              { source_file: 'lib/data/services/api_service.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/ui/widgets/user_card.dart', relationship_type: 'imports', weight: 2 },
-              { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/data/repositories/user_repository.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/ui/screens/login_screen.dart', target_file: 'lib/data/repositories/auth_repository.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/home_screen.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/utils/validators.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1 },
-              { source_file: 'lib/data/models/user.dart', target_file: 'lib/utils/json_serializable.dart', relationship_type: 'implements', weight: 1 },
-              { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/ui/widgets/base_card.dart', relationship_type: 'extends', weight: 1 },
-            ],
-            // Enhanced dependencies with detailed metadata for Lakos metrics
-            enhanced_dependencies: [
-              { source_file: 'lib/main.dart', target_file: 'lib/app.dart', relationship_type: 'imports', weight: 1, line_number: 3, import_statement: 'import "app.dart";', symbols: ['App'], metadata: { 'coupling_strength': 'strong' } },
-              { source_file: 'lib/app.dart', target_file: 'lib/config/routes.dart', relationship_type: 'imports', weight: 1, line_number: 5, import_statement: 'import "config/routes.dart";', symbols: ['AppRoutes'], metadata: { 'coupling_strength': 'medium' } },
-              { source_file: 'lib/app.dart', target_file: 'lib/config/theme.dart', relationship_type: 'imports', weight: 1, line_number: 6, import_statement: 'import "config/theme.dart";', symbols: ['AppTheme'], metadata: { 'coupling_strength': 'medium' } },
-              { source_file: 'lib/data/repositories/user_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 2, line_number: 8, import_statement: 'import "../services/api_service.dart";', symbols: ['ApiService', 'HttpClient'], metadata: { 'coupling_strength': 'strong' } },
-              { source_file: 'lib/data/repositories/auth_repository.dart', target_file: 'lib/data/services/api_service.dart', relationship_type: 'imports', weight: 3, line_number: 12, import_statement: 'import "../services/api_service.dart";', symbols: ['ApiService', 'AuthClient', 'TokenManager'], metadata: { 'coupling_strength': 'very_strong' } },
-              { source_file: 'lib/data/services/api_service.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1, line_number: 15, import_statement: 'import "../models/user.dart";', symbols: ['User'], metadata: { 'coupling_strength': 'medium' } },
-              { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/ui/widgets/user_card.dart', relationship_type: 'imports', weight: 2, line_number: 18, import_statement: 'import "../widgets/user_card.dart";', symbols: ['UserCard', 'UserCardState'], metadata: { 'coupling_strength': 'strong' } },
-              { source_file: 'lib/ui/screens/home_screen.dart', target_file: 'lib/data/repositories/user_repository.dart', relationship_type: 'imports', weight: 1, line_number: 22, import_statement: 'import "../../data/repositories/user_repository.dart";', symbols: ['UserRepository'], metadata: { 'coupling_strength': 'medium' } },
-              { source_file: 'lib/ui/screens/login_screen.dart', target_file: 'lib/data/repositories/auth_repository.dart', relationship_type: 'imports', weight: 1, line_number: 25, import_statement: 'import "../../data/repositories/auth_repository.dart";', symbols: ['AuthRepository'], metadata: { 'coupling_strength': 'medium' } },
-              { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/data/models/user.dart', relationship_type: 'imports', weight: 1, line_number: 28, import_statement: 'import "../../data/models/user.dart";', symbols: ['User'], metadata: { 'coupling_strength': 'medium' } },
-              { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/home_screen.dart', relationship_type: 'imports', weight: 1, line_number: 31, import_statement: 'import "../ui/screens/home_screen.dart";', symbols: ['HomeScreen'], metadata: { 'coupling_strength': 'weak' } },
-              { source_file: 'lib/config/routes.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1, line_number: 32, import_statement: 'import "../ui/screens/login_screen.dart";', symbols: ['LoginScreen'], metadata: { 'coupling_strength': 'weak' } },
-              { source_file: 'lib/utils/validators.dart', target_file: 'lib/ui/screens/login_screen.dart', relationship_type: 'imports', weight: 1, line_number: 35, import_statement: 'import "../ui/screens/login_screen.dart";', symbols: ['LoginForm'], metadata: { 'coupling_strength': 'weak' } },
-              { source_file: 'lib/data/models/user.dart', target_file: 'lib/utils/json_serializable.dart', relationship_type: 'implements', weight: 1, line_number: 38, import_statement: 'import "../../utils/json_serializable.dart";', symbols: ['JsonSerializable'], metadata: { 'coupling_strength': 'medium' } },
-              { source_file: 'lib/ui/widgets/user_card.dart', target_file: 'lib/ui/widgets/base_card.dart', relationship_type: 'extends', weight: 1, line_number: 41, import_statement: 'import "base_card.dart";', symbols: ['BaseCard'], metadata: { 'coupling_strength': 'strong' } },
-            ],
-            // Enhanced Lakos metrics for TDD testing
-            global_metrics: {
-              total_sloc: 1847,
-              average_sloc: 123.1,
-              quality_score: 87.5,
-              architectural_instability: 0.34,
-              component_count: 15,
-              cycle_count: 0,
-              max_component_size: 342,
-              dependency_inversion_ratio: 0.73
-            },
-            node_metrics: {
-              'lib/main.dart': { sloc: 42, instability: 0.1, incoming_dependencies: 0, outgoing_dependencies: 1, component_dependency_count: 1 },
-              'lib/app.dart': { sloc: 156, instability: 0.67, incoming_dependencies: 1, outgoing_dependencies: 2, component_dependency_count: 3 },
-              'lib/config/routes.dart': { sloc: 89, instability: 0.0, incoming_dependencies: 1, outgoing_dependencies: 2, component_dependency_count: 3 },
-              'lib/config/theme.dart': { sloc: 67, instability: 0.0, incoming_dependencies: 1, outgoing_dependencies: 0, component_dependency_count: 1 },
-              'lib/data/repositories/user_repository.dart': { sloc: 134, instability: 0.5, incoming_dependencies: 1, outgoing_dependencies: 1, component_dependency_count: 2 },
-              'lib/data/repositories/auth_repository.dart': { sloc: 98, instability: 0.5, incoming_dependencies: 1, outgoing_dependencies: 1, component_dependency_count: 2 },
-              'lib/data/services/api_service.dart': { sloc: 342, instability: 0.33, incoming_dependencies: 2, outgoing_dependencies: 1, component_dependency_count: 3 },
-              'lib/data/models/user.dart': { sloc: 76, instability: 0.5, incoming_dependencies: 2, outgoing_dependencies: 1, component_dependency_count: 3 },
-              'lib/ui/screens/home_screen.dart': { sloc: 287, instability: 0.67, incoming_dependencies: 1, outgoing_dependencies: 2, component_dependency_count: 3 },
-              'lib/ui/screens/login_screen.dart': { sloc: 198, instability: 0.67, incoming_dependencies: 1, outgoing_dependencies: 2, component_dependency_count: 3 },
-              'lib/ui/widgets/user_card.dart': { sloc: 123, instability: 0.67, incoming_dependencies: 1, outgoing_dependencies: 2, component_dependency_count: 3 },
-              'lib/ui/widgets/base_card.dart': { sloc: 87, instability: 0.0, incoming_dependencies: 1, outgoing_dependencies: 0, component_dependency_count: 1 },
-              'lib/utils/validators.dart': { sloc: 54, instability: 0.0, incoming_dependencies: 0, outgoing_dependencies: 1, component_dependency_count: 1 },
-              'lib/utils/json_serializable.dart': { sloc: 94, instability: 0.0, incoming_dependencies: 1, outgoing_dependencies: 0, component_dependency_count: 1 }
-            },
-            architecture_quality_score: 87.5,
-            enhanced_analysis: true,
-            metrics: {
-              analysis_duration_ms: 1500,
-              total_files: 15,
-              total_dependencies: 15
-            }
-          }
-        }
-      ]);
-      setStatistics({
-        total_files: 15,
-        total_dependencies: 15,
-        average_dependencies_per_file: 1.0,
-        cycles_detected: 0,
-        instability_score: 0.45
-      });
-      console.log('✅ Web version: Sample data generated');
+      console.log('🌐 Web version: Loading sample data');
+      setSnapshots(mockAnalysisSnapshots);
+      setStatistics(mockStatistics);
+      console.log('✅ Web version: Sample data loaded');
       return;
     }
 
@@ -258,8 +160,14 @@ function App() {
 
     } catch (err: any) {
       setIsAnalyzing(false);
-      setError(`Failed to start analysis: ${err}`);
-      console.error('Analysis error:', err);
+      const errorMessage = err?.toString() || 'Unknown error';
+
+      // Add error to logs for visibility
+      setAnalysisLogs(prev => [...prev, `❌ ERROR: ${errorMessage}`]);
+
+      // Set error state
+      setError(`Failed to start analysis: ${errorMessage}`);
+      console.error('❌ Analysis error:', err);
     }
   };
 

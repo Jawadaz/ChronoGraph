@@ -183,16 +183,29 @@ impl ChronoGraphEngine {
                     snapshots.push(snapshot);
                 }
                 Err(e) => {
-                    let error_msg = format!("Failed to analyze commit {}: {}", commit_info.hash, e);
+                    let error_string = e.to_string();
+                    let error_msg = format!("{}", error_string);
                     println!("❌ Error: {}", error_msg);
-                    
-                    // For critical failures (like Lakos not working), fail immediately
-                    if e.to_string().contains("Failed to run dependency analysis") || 
-                       e.to_string().contains("Directory listing failed") ||
-                       e.to_string().contains("Lakos") {
+
+                    // For critical failures (like project structure issues), fail immediately
+                    let is_critical_error = error_string.contains("Failed to run dependency analysis") ||
+                                           error_string.contains("Directory listing failed") ||
+                                           error_string.contains("Cannot analyze project") ||
+                                           error_string.contains("Required project files not found");
+
+                    if is_critical_error {
+                        // Send failed progress update before returning
+                        progress_callback(AnalysisProgress {
+                            phase: AnalysisPhase::Failed(error_msg.clone()),
+                            current_commit: index + 1,
+                            total_commits: analysis_count,
+                            current_commit_hash: commit_info.hash.clone(),
+                            message: error_msg.clone(),
+                            percentage: 15.0 + (index as f64 / analysis_count as f64) * 80.0,
+                        });
                         return Err(anyhow::anyhow!("{}", error_msg));
                     }
-                    
+
                     // For other errors, continue with warning
                     println!("Warning: Continuing with next commit...");
                 }
@@ -431,8 +444,13 @@ impl ChronoGraphEngine {
 
         // Verify project can be analyzed at this commit
         if !analyzer.can_analyze_project(&analysis_path) {
-            anyhow::bail!("Project cannot be analyzed by {} at commit {} (path: {})",
-                         analyzer.name(), commit_info.hash, analysis_path.display());
+            let suggestion = if analyzer.name() == "lakos" {
+                " (No pubspec.yaml found - this doesn't appear to be a Flutter/Dart project. If the project is in a subfolder, please specify it in the analysis settings.)"
+            } else {
+                ""
+            };
+            anyhow::bail!("Cannot analyze project at commit {}: Required project files not found{}",
+                         &commit_info.hash[..8], suggestion);
         }
 
         // Try to get analysis result from cache first
@@ -615,6 +633,7 @@ mod tests {
         let engine = ChronoGraphEngine::new(ChronoGraphConfig {
             commit_sampling: 2,
             max_commits: None,
+            is_local_repository: false,
             ..Default::default()
         });
         

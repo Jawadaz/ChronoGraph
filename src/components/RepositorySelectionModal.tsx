@@ -141,6 +141,7 @@ export const RepositorySelectionModal: React.FC<RepositorySelectionModalProps> =
     'https://github.com/flutter/samples',
     'https://github.com/flutter/gallery',
     'https://github.com/flutter/plugins',
+    'https://github.com/localsend/localsend',
   ];
 
   if (!isVisible) return null;

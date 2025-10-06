@@ -99,9 +99,9 @@ export const AnalysisProgress: React.FC<AnalysisProgressProps> = ({ progress, lo
           <div className="logs-container">
             {logs.slice(-20).map((log, index) => (
               <div key={index} className={`log-entry ${
-                log.includes('Warning:') ? 'warning' : 
-                log.includes('Error:') ? 'error' :
-                log.includes('Successfully') ? 'success' : 
+                log.includes('Warning:') || log.includes('⚠️') ? 'warning' :
+                log.includes('Error:') || log.includes('ERROR') || log.includes('❌') ? 'error' :
+                log.includes('Successfully') || log.includes('✅') ? 'success' :
                 'info'
               }`}>
                 {log}
