@@ -151,20 +151,46 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       }
 
       // Reset all elements first
-      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
+      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover boundary-incoming boundary-outgoing');
 
-      // Get connected edges
-      const connectedEdges = node.connectedEdges();
-      const incomingEdges = connectedEdges.filter(edge => edge.target().id() === nodeId);
-      const outgoingEdges = connectedEdges.filter(edge => edge.source().id() === nodeId);
+      // Check if this is a compound node (expanded folder)
+      const isCompoundNode = node.isParent();
 
-      // Highlight incoming connections (dependencies on this node)
-      incomingEdges.addClass('highlighted-incoming');
-      incomingEdges.sources().addClass('highlighted-source');
+      if (isCompoundNode) {
+        // For compound nodes, highlight boundary-crossing edges
+        const allEdges = cy.edges();
 
-      // Highlight outgoing connections (this node depends on)
-      outgoingEdges.addClass('highlighted-outgoing');
-      outgoingEdges.targets().addClass('highlighted-target');
+        allEdges.forEach((edge: any) => {
+          const source = edge.source();
+          const target = edge.target();
+
+          // Check if source/target are children of this compound node
+          const sourceIsChild = source.isChild() && source.ancestors().includes(node);
+          const targetIsChild = target.isChild() && target.ancestors().includes(node);
+
+          // Incoming boundary: source outside, target inside → green
+          if (!sourceIsChild && targetIsChild) {
+            edge.addClass('boundary-incoming');
+          }
+          // Outgoing boundary: source inside, target outside → red
+          else if (sourceIsChild && !targetIsChild) {
+            edge.addClass('boundary-outgoing');
+          }
+        });
+      } else {
+        // For regular nodes, use the existing highlighting logic
+        const connectedEdges = node.connectedEdges();
+        const incomingEdges = connectedEdges.filter(edge => edge.target().id() === nodeId);
+        const outgoingEdges = connectedEdges.filter(edge => edge.source().id() === nodeId);
+
+        // Highlight incoming connections (dependencies on this node)
+        incomingEdges.addClass('highlighted-incoming');
+        incomingEdges.sources().addClass('highlighted-source');
+
+        // Highlight outgoing connections (this node depends on)
+        outgoingEdges.addClass('highlighted-outgoing');
+        outgoingEdges.targets().addClass('highlighted-target');
+      }
 
       // Highlight the hovered node itself
       node.addClass('highlighted-hover');
@@ -177,7 +203,7 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       }
 
       // Remove all highlighting
-      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
+      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover boundary-incoming boundary-outgoing');
     });
 
     // Hover effects for edges
@@ -197,7 +223,7 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
 
     cy.on('mouseout', 'edge', (event) => {
       // Remove all highlighting
-      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
+      cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover boundary-incoming boundary-outgoing');
     });
 
     // Cleanup
@@ -1194,6 +1220,33 @@ const getTreeBasedCytoscapeStyles = (
     }
   },
 
+  // Boundary-crossing edges for expanded folders
+  // Incoming boundary edge: from outside container to inside
+  {
+    selector: 'edge.boundary-incoming',
+    style: {
+      'line-color': '#ef4444', // Red for incoming (consistent with regular nodes)
+      'target-arrow-color': '#ef4444',
+      'width': 3,
+      'opacity': 1,
+      'z-index': 10,
+      'curve-style': 'bezier'
+    }
+  },
+
+  // Outgoing boundary edge: from inside container to outside
+  {
+    selector: 'edge.boundary-outgoing',
+    style: {
+      'line-color': '#22c55e', // Green for outgoing (consistent with regular nodes)
+      'target-arrow-color': '#22c55e',
+      'width': 3,
+      'opacity': 1,
+      'z-index': 10,
+      'curve-style': 'bezier'
+    }
+  },
+
   // Dim non-highlighted elements during hover (excluding compound nodes)
   {
     selector: 'node:unselected:simple',  // Only simple nodes, not compound nodes
@@ -1245,18 +1298,20 @@ const getTreeBasedCytoscapeStyles = (
     style: {
       'opacity': (ele: any) => {
         // Check if any highlighting is active
-        const hasHighlighted = ele.cy().elements('.highlighted-incoming, .highlighted-outgoing, .highlighted-source, .highlighted-target, .highlighted-hover').length > 0;
+        const hasHighlighted = ele.cy().elements('.highlighted-incoming, .highlighted-outgoing, .highlighted-source, .highlighted-target, .highlighted-hover, .boundary-incoming, .boundary-outgoing').length > 0;
         if (hasHighlighted) {
-          // If this element is highlighted, keep it visible
+          // If this element is highlighted (including boundary edges), keep it visible
           const isHighlighted = ele.hasClass('highlighted-incoming') ||
                                ele.hasClass('highlighted-outgoing') ||
-                               ele.hasClass('highlighted-hover');
+                               ele.hasClass('highlighted-hover') ||
+                               ele.hasClass('boundary-incoming') ||
+                               ele.hasClass('boundary-outgoing');
 
           if (isHighlighted) {
             return 1;
           }
 
-          // Don't dim edges between children of hovered compound nodes
+          // Handle edges for hovered compound nodes (expanded folders)
           const hoveredCompoundNodes = ele.cy().elements('node.highlighted-hover:parent');
           if (hoveredCompoundNodes.length > 0) {
             const source = ele.source();
@@ -1264,12 +1319,20 @@ const getTreeBasedCytoscapeStyles = (
 
             for (let i = 0; i < hoveredCompoundNodes.length; i++) {
               const compoundNode = hoveredCompoundNodes[i];
-              // Check if both source and target are children of the hovered compound node
+              // Check if source/target are children of the hovered compound node
               const sourceIsChild = source.isChild() && source.ancestors().includes(compoundNode);
               const targetIsChild = target.isChild() && target.ancestors().includes(compoundNode);
 
+              // Internal edge: both inside the container
               if (sourceIsChild && targetIsChild) {
-                return 1; // Keep internal edges of hovered expanded folders at full opacity
+                return 1; // Keep internal edges at full opacity
+              }
+
+              // Boundary-crossing edges get highlighted (handled by separate selectors)
+              // Incoming: source outside, target inside → will be styled green
+              // Outgoing: source inside, target outside → will be styled red
+              if (sourceIsChild || targetIsChild) {
+                return 1; // Keep boundary edges visible (styling handled elsewhere)
               }
             }
           }
