@@ -272,18 +272,18 @@ impl GitTemporalNavigator {
                 sequence.push(commit_info);
                 filtered_commits += 1;
                 
-                println!("✓ MATCHED commit #{}: {} - {}", filtered_commits, &commit_hash[..8], 
+                println!("✓ MATCHED commit #{}: {} - {}", filtered_commits, &commit_hash[..8],
                          current_commit.message().unwrap_or("<no message>").lines().next().unwrap_or(""));
-                
-                // Show a few more matches to verify the fix is working
-                if filtered_commits >= 1 {
-                    println!("Found {} matches - limiting to 1 commit for testing", filtered_commits);
+
+                // Limit to a reasonable number of commits for analysis
+                if filtered_commits >= 50 {
+                    println!("Found {} matches - limiting to 50 commits for performance", filtered_commits);
                     break;
                 }
             }
 
-            // Early exit if we have scanned too many commits (performance optimization for testing)
-            if total_commits > 100 {
+            // Early exit if we have scanned too many commits (performance optimization)
+            if total_commits > 500 {
                 println!("Performance limit: Scanned {} commits, stopping to avoid UI timeout", total_commits);
                 break;
             }

@@ -1,16 +1,33 @@
 import { Dependency } from '../types/Dependency';
 import { CytoscapeElement, CytoscapeNodeData, CytoscapeEdgeData } from './cytoscapeTransforms';
 import { TreeNode, CheckboxState } from './treeStructure';
+import { DependencyDiff } from './commitDiff';
 
 /**
  * Transform dependencies to graph elements based on tree selection state
  */
 export function transformToTreeBasedGraphElements(
   dependencies: Dependency[],
-  treeNodes: Map<string, TreeNode>
+  treeNodes: Map<string, TreeNode>,
+  dependencyDiff?: DependencyDiff | null
 ): { elements: CytoscapeElement[] } {
   const nodes = new Map<string, CytoscapeNodeData>();
   const edges = new Map<string, CytoscapeEdgeData>();
+
+  // Helper to get diff status for a dependency
+  const getDiffStatus = (dep: Dependency): 'added' | 'removed' | 'unchanged' | null => {
+    if (!dependencyDiff) return null;
+
+    const createKey = (d: Dependency) =>
+      `${d.source_file}→${d.target_file}→${d.relationship_type}`;
+    const key = createKey(dep);
+
+    if (dependencyDiff.added.find(d => createKey(d) === key)) return 'added';
+    if (dependencyDiff.removed.find(d => createKey(d) === key)) return 'removed';
+    if (dependencyDiff.unchanged.find(d => createKey(d) === key)) return 'unchanged';
+
+    return null;
+  };
 
   // Get filtering info from tree
   const { includedPaths, expandedFolders, collapsedFolders } = getTreeFilteringInfo(treeNodes);
@@ -22,24 +39,6 @@ export function transformToTreeBasedGraphElements(
   // Only exclude artificial root nodes, not real project folders
   const shouldExcludeRoot = rootId === 'app' || rootId === 'project' || rootId === 'src';
 
-  // DEBUG: Check for config node issues only
-  const configNodeState = treeNodes.get('lib/config');
-  const configInIncluded = includedPaths.has('lib/config');
-
-  if (configNodeState || configInIncluded) {
-    console.log('🚨 CONFIG DEBUG:', {
-      configState: configNodeState?.checkboxState || 'not found',
-      configIncluded: configInIncluded,
-      totalIncluded: includedPaths.size
-    });
-  }
-
-
-  console.log('📊 Processing dependencies:', {
-    totalDependencies: dependencies.length,
-    totalIncludedPaths: includedPaths.size,
-    sampleIncludedPaths: Array.from(includedPaths).slice(0, 10)
-  });
 
   let processedCount = 0;
   let skippedCount = 0;
@@ -49,39 +48,14 @@ export function transformToTreeBasedGraphElements(
     const sourcePath = normalizePath(dep.source_file);
     const targetPath = normalizePath(dep.target_file);
 
-    // Debug first few dependencies
-    if (index < 2) {
-      console.log(`🔍 Sample dependency [${index}]:`, {
-        originalSource: dep.source_file,
-        normalizedSource: sourcePath,
-        originalTarget: dep.target_file,
-        normalizedTarget: targetPath
-      });
-    }
-
     // Only process dependencies where both source and target should be visible
     // Check if the source and target paths map to included tree nodes
     const sourceDisplayLevel = determineDisplayLevel(sourcePath, treeNodes, includedPaths, expandedFolders, collapsedFolders);
     const targetDisplayLevel = determineDisplayLevel(targetPath, treeNodes, includedPaths, expandedFolders, collapsedFolders);
 
-    if (index < 2) {
-      console.log(`  → Display levels: source='${sourceDisplayLevel}', target='${targetDisplayLevel}'`);
-      console.log(`  → Included checks: source=${sourceDisplayLevel ? includedPaths.has(sourceDisplayLevel) : false}, target=${targetDisplayLevel ? includedPaths.has(targetDisplayLevel) : false}`);
-    }
-
     // Skip this dependency if either endpoint is not included in the tree view
     if (!sourceDisplayLevel || !targetDisplayLevel || !includedPaths.has(sourceDisplayLevel) || !includedPaths.has(targetDisplayLevel)) {
       skippedCount++;
-      // Only log first few skips to avoid spam
-      if (index < 2) {
-        console.log('🚫 Skipping dependency:', {
-          source: sourcePath,
-          target: targetPath,
-          reason: !sourceDisplayLevel ? 'no source level' :
-                  !targetDisplayLevel ? 'no target level' :
-                  !includedPaths.has(sourceDisplayLevel) ? 'source not included' : 'target not included'
-        });
-      }
       return;
     }
 
@@ -98,6 +72,14 @@ export function transformToTreeBasedGraphElements(
         const existing = edges.get(edgeId)!;
         existing.weight += 1;
         existing.originalDependencies.push(dep);
+
+        // Update diff status - prioritize added/removed over unchanged
+        const depStatus = getDiffStatus(dep);
+        if (depStatus === 'added' || depStatus === 'removed') {
+          existing.diffStatus = depStatus;
+        } else if (!existing.diffStatus) {
+          existing.diffStatus = depStatus;
+        }
       } else {
         // Create new edge
         edges.set(edgeId, {
@@ -106,7 +88,8 @@ export function transformToTreeBasedGraphElements(
           target: targetLeafId,
           weight: 1,
           relationshipType: dep.relationship_type,
-          originalDependencies: [dep]
+          originalDependencies: [dep],
+          diffStatus: getDiffStatus(dep)
         });
       }
     } else {
@@ -114,13 +97,6 @@ export function transformToTreeBasedGraphElements(
     }
   });
 
-  console.log('📊 Dependency processing summary:', {
-    totalDependencies: dependencies.length,
-    processedCount,
-    skippedCount,
-    createdNodes: nodes.size,
-    createdEdges: edges.size
-  });
 
   // Create compound parent containers for expanded folders (excluding artificial root)
   createCompoundContainers(treeNodes, expandedFolders, nodes, shouldExcludeRoot ? rootId : undefined);
@@ -161,16 +137,6 @@ export function transformToTreeBasedGraphElements(
       data: edgeData
     });
   });
-
-  // DEBUG: Final node check - only show if config appears
-  const finalNodeIds = elements.filter(e => e.group === 'nodes').map(e => e.data.id);
-  const configNodes = finalNodeIds.filter(id => id?.includes('config'));
-
-  if (configNodes.length > 0) {
-    console.log('🚨 CONFIG FOUND IN FINAL RESULT:', configNodes);
-  }
-
-  console.log('✅ Graph created:', { nodes: finalNodeIds.length, edges: edges.size });
 
   return { elements };
 }
@@ -256,10 +222,6 @@ function createTreeBasedNode(
 ): string | null {
   const pathParts = filePath.split('/').filter(part => part.length > 0);
 
-  // Only log config-related node creation
-  if (filePath.includes('config')) {
-    console.log('🔍 Creating config node for:', filePath);
-  }
 
   // Determine the display level using the shared logic
   const displayLevel = determineDisplayLevel(filePath, treeNodes, includedPaths, expandedFolders, collapsedFolders);
@@ -278,14 +240,8 @@ function createTreeBasedNode(
       const isFileLevel = displayLevel === filePath;
       createGraphNode(displayLevel, levelLabel, isFileLevel ? 'file' : 'folder', parentContainer, true, nodes);
     }
-  } else if (displayLevel && filePath.includes('config')) {
-    console.log('🚫 Skipping config node creation for unchecked path:', displayLevel);
   }
 
-  // Only log config-related results
-  if (filePath.includes('config')) {
-    console.log('🎯 Config node result:', leafNodeId);
-  }
   return leafNodeId;
 }
 

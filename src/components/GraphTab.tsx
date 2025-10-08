@@ -3,6 +3,7 @@ import { TreeBasedCytoscapeGraph } from './TreeBasedCytoscapeGraph';
 import { TreeView } from './TreeView';
 import { NodeDetailsPanel } from './NodeDetailsPanel';
 import { AnalysisResult, VisualEncodingConfig } from '../types/Dependency';
+import { calculateDependencyDiff, getDiffSummary, type DependencyDiff } from '../utils/commitDiff';
 
 interface Dependency {
   source_file: string;
@@ -45,6 +46,13 @@ interface GraphTabProps {
   treeVersion: number;
   handleTreeCheckboxChange: (nodeId: string, newState: 'checked' | 'unchecked' | 'half-checked') => void;
   handleEdgeDoubleClick: (sourceId: string, targetId: string, relationshipTypes: string[]) => void;
+  compareMode: boolean;
+  setCompareMode: (mode: boolean) => void;
+  compareCommitA: CommitSnapshot | null;
+  setCompareCommitA: (commit: CommitSnapshot | null) => void;
+  compareCommitB: CommitSnapshot | null;
+  setCompareCommitB: (commit: CommitSnapshot | null) => void;
+  allSnapshots: CommitSnapshot[];
 }
 
 export const GraphTab: React.FC<GraphTabProps> = ({
@@ -57,15 +65,35 @@ export const GraphTab: React.FC<GraphTabProps> = ({
   treeRootId,
   treeVersion,
   handleTreeCheckboxChange,
-  handleEdgeDoubleClick
+  handleEdgeDoubleClick,
+  compareMode,
+  setCompareMode,
+  compareCommitA,
+  setCompareCommitA,
+  compareCommitB,
+  setCompareCommitB,
+  allSnapshots
 }) => {
   const [detailsPanelHeight, setDetailsPanelHeight] = React.useState(50);
   const [isDragging, setIsDragging] = React.useState(false);
   const [hoveredNodeId, setHoveredNodeId] = React.useState<string | null>(null);
 
-  const handleFolderToggle = (nodeId: string) => {
-    console.log('🔍 Searching for node:', nodeId, 'in tree with', treeNodes.size, 'nodes');
+  // Calculate dependency diff when in compare mode
+  const dependencyDiff: DependencyDiff | null = React.useMemo(() => {
+    if (!compareMode || !compareCommitA || !compareCommitB) {
+      return null;
+    }
+    return calculateDependencyDiff(compareCommitA, compareCommitB);
+  }, [compareMode, compareCommitA, compareCommitB]);
 
+  const diffSummary = React.useMemo(() => {
+    if (!dependencyDiff || !compareCommitA || !compareCommitB) {
+      return null;
+    }
+    return getDiffSummary(dependencyDiff, compareCommitA, compareCommitB);
+  }, [dependencyDiff, compareCommitA, compareCommitB]);
+
+  const handleFolderToggle = (nodeId: string) => {
     // Find the node - it might be a full path or just the folder name
     let node = treeNodes.get(nodeId);
     let foundKey = nodeId;
@@ -74,7 +102,6 @@ export const GraphTab: React.FC<GraphTabProps> = ({
     if (!node) {
       for (const [key, treeNode] of treeNodes.entries()) {
         if (key === nodeId || key.endsWith('/' + nodeId) || key.endsWith('\\' + nodeId)) {
-          console.log('✅ Found match:', key, 'for nodeId:', nodeId);
           node = treeNode;
           foundKey = key;
           break;
@@ -82,19 +109,12 @@ export const GraphTab: React.FC<GraphTabProps> = ({
       }
     }
 
-    if (!node) {
-      console.log('❌ Node not found. Available keys:', Array.from(treeNodes.keys()).slice(0, 10));
-      return;
-    }
-
-    if (node.type !== 'folder') {
-      console.log('❌ Not a folder, type:', node.type);
+    if (!node || node.type !== 'folder') {
       return;
     }
 
     // Toggle between checked (expanded) and half-checked (collapsed)
     const newState = node.checkboxState === 'checked' ? 'half-checked' : 'checked';
-    console.log(`🔄 Toggling ${foundKey} from ${node.checkboxState} to ${newState}`);
     handleTreeCheckboxChange(foundKey, newState);
   };
 
@@ -135,6 +155,79 @@ export const GraphTab: React.FC<GraphTabProps> = ({
 
   return (
     <div className="graph-view">
+      {/* Compare Mode Controls */}
+      <div className="compare-mode-controls">
+        <div className="compare-toggle">
+          <label>
+            <input
+              type="checkbox"
+              checked={compareMode}
+              onChange={(e) => setCompareMode(e.target.checked)}
+            />
+            <span>📊 Compare Commits</span>
+          </label>
+        </div>
+
+        {compareMode && allSnapshots.length >= 2 && (
+          <div className="commit-selectors">
+            <div className="commit-selector">
+              <label>From:</label>
+              <select
+                value={(() => {
+                  const getHash = (s: CommitSnapshot) => s.commit_hash || s.commit_info?.hash;
+                  const targetHash = getHash(compareCommitA!);
+                  const idx = allSnapshots.findIndex(s => getHash(s) === targetHash);
+                  return idx >= 0 ? idx : 0;
+                })()}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value);
+                  const commit = allSnapshots[idx];
+                  setCompareCommitA(commit || null);
+                }}
+              >
+                {allSnapshots.map((snapshot, idx) => (
+                  <option key={`from-${idx}`} value={idx}>
+                    {snapshot.commit_info.hash.substring(0, 8)} - {snapshot.commit_info.message.split('\n')[0].substring(0, 50)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <span className="arrow">→</span>
+
+            <div className="commit-selector">
+              <label>To:</label>
+              <select
+                value={(() => {
+                  const getHash = (s: CommitSnapshot) => s.commit_hash || s.commit_info?.hash;
+                  const targetHash = getHash(compareCommitB!);
+                  const idx = allSnapshots.findIndex(s => getHash(s) === targetHash);
+                  return idx >= 0 ? idx : (allSnapshots.length > 1 ? 1 : 0);
+                })()}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value);
+                  const commit = allSnapshots[idx];
+                  setCompareCommitB(commit || null);
+                }}
+              >
+                {allSnapshots.map((snapshot, idx) => (
+                  <option key={`to-${idx}`} value={idx}>
+                    {snapshot.commit_info.hash.substring(0, 8)} - {snapshot.commit_info.message.split('\n')[0].substring(0, 50)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {diffSummary && (
+              <div className="diff-summary">
+                <span className="added">+{diffSummary.addedCount}</span>
+                <span className="removed">-{diffSummary.removedCount}</span>
+                <span className="unchanged">={diffSummary.unchangedCount}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Tree-Based Graph - Full Width with Collapsible Tree */}
       <div className={`tree-based-graph-container ${isTreePanelCollapsed ? 'tree-collapsed' : ''}`}>
@@ -225,6 +318,7 @@ export const GraphTab: React.FC<GraphTabProps> = ({
             hoveredNodeId={hoveredNodeId}
             onNodeHover={setHoveredNodeId}
             onToggleFolderExpansion={handleFolderToggle}
+            dependencyDiff={dependencyDiff}
           />
         </div>
       </div>
@@ -234,6 +328,111 @@ export const GraphTab: React.FC<GraphTabProps> = ({
           height: 100%;
           display: flex;
           flex-direction: column;
+        }
+
+        .compare-mode-controls {
+          padding: 12px 20px;
+          background: white;
+          border-bottom: 1px solid #e2e8f0;
+          display: flex;
+          align-items: center;
+          gap: 20px;
+          flex-wrap: wrap;
+        }
+
+        .compare-toggle {
+          flex-shrink: 0;
+        }
+
+        .compare-toggle label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+          font-weight: 500;
+          color: #374151;
+          font-size: 14px;
+        }
+
+        .compare-toggle input[type="checkbox"] {
+          width: 16px;
+          height: 16px;
+          cursor: pointer;
+        }
+
+        .commit-selectors {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex: 1;
+          min-width: 0;
+        }
+
+        .commit-selector {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex: 1;
+          min-width: 0;
+        }
+
+        .commit-selector label {
+          font-size: 13px;
+          font-weight: 600;
+          color: #64748b;
+          white-space: nowrap;
+        }
+
+        .commit-selector select {
+          padding: 6px 12px;
+          border: 1px solid #cbd5e0;
+          border-radius: 6px;
+          font-size: 13px;
+          background: white;
+          cursor: pointer;
+          flex: 1;
+          min-width: 0;
+          transition: all 0.2s;
+        }
+
+        .commit-selector select:hover {
+          border-color: #3b82f6;
+        }
+
+        .commit-selector select:focus {
+          outline: none;
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .arrow {
+          font-size: 18px;
+          color: #64748b;
+          font-weight: bold;
+        }
+
+        .diff-summary {
+          display: flex;
+          gap: 12px;
+          margin-left: auto;
+          font-size: 13px;
+          font-weight: 600;
+          padding: 6px 12px;
+          background: #f8fafc;
+          border-radius: 6px;
+          border: 1px solid #e2e8f0;
+        }
+
+        .diff-summary .added {
+          color: #22c55e;
+        }
+
+        .diff-summary .removed {
+          color: #ef4444;
+        }
+
+        .diff-summary .unchanged {
+          color: #64748b;
         }
 
         .tree-based-graph-container {

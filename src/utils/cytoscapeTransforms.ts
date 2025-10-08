@@ -20,6 +20,7 @@ export interface CytoscapeEdgeData {
   weight: number;
   relationshipType: string;
   originalDependencies: Dependency[];
+  diffStatus?: 'added' | 'removed' | 'unchanged' | null;
 }
 
 export interface CytoscapeElement {

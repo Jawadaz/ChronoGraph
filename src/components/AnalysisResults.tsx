@@ -87,6 +87,11 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
   const [selectedGraphNode, setSelectedGraphNode] = React.useState<string | null>(null);
   const [isTreePanelCollapsed, setIsTreePanelCollapsed] = React.useState(false);
 
+  // Compare mode state
+  const [compareMode, setCompareMode] = React.useState(false);
+  const [compareCommitA, setCompareCommitA] = React.useState<CommitSnapshot | null>(snapshots[0] || null);
+  const [compareCommitB, setCompareCommitB] = React.useState<CommitSnapshot | null>(snapshots[1] || null);
+
   // Build tree immediately from selected commit (using useMemo for synchronous initialization)
   const projectTree = React.useMemo(() => {
     if (!selectedCommit) {
@@ -207,6 +212,13 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ snapshots, sta
             treeVersion={treeVersion}
             handleTreeCheckboxChange={handleTreeCheckboxChange}
             handleEdgeDoubleClick={handleEdgeDoubleClick}
+            compareMode={compareMode}
+            setCompareMode={setCompareMode}
+            compareCommitA={compareCommitA}
+            setCompareCommitA={setCompareCommitA}
+            compareCommitB={compareCommitB}
+            setCompareCommitB={setCompareCommitB}
+            allSnapshots={snapshots}
           />
         )}
       </div>

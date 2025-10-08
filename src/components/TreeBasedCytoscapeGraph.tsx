@@ -8,6 +8,7 @@ import { TreeNode } from '../utils/treeStructure';
 import { transformToTreeBasedGraphElements } from '../utils/treeBasedGraphTransforms';
 import { GraphSettings } from './GraphSettings';
 import { useGraphSettings } from '../hooks/useGraphSettings';
+import { DependencyDiff } from '../utils/commitDiff';
 
 // Register layouts
 cytoscape.use(dagre);
@@ -24,6 +25,7 @@ interface TreeBasedCytoscapeGraphProps {
   hoveredNodeId?: string | null;
   onNodeHover?: (nodeId: string | null) => void;
   onToggleFolderExpansion?: (nodeId: string) => void;
+  dependencyDiff?: DependencyDiff | null;
 }
 
 export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = ({
@@ -43,7 +45,8 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
   onEdgeDoubleClick,
   hoveredNodeId,
   onNodeHover,
-  onToggleFolderExpansion
+  onToggleFolderExpansion,
+  dependencyDiff
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
@@ -248,7 +251,7 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     });
 
     // Transform dependencies based on current tree state
-    const { elements } = transformToTreeBasedGraphElements(dependencies, treeNodes);
+    const { elements } = transformToTreeBasedGraphElements(dependencies, treeNodes, dependencyDiff);
     const nodeCount = elements.filter(el => el.group === 'nodes').length;
     const edges = elements.filter(el => el.group === 'edges');
 
@@ -397,8 +400,8 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
 
   // Calculate current node count for settings (memoized to avoid recalculation)
   const currentElements = useMemo(() =>
-    transformToTreeBasedGraphElements(dependencies, treeNodes),
-    [dependencies, treeNodes, treeVersion]
+    transformToTreeBasedGraphElements(dependencies, treeNodes, dependencyDiff),
+    [dependencies, treeNodes, treeVersion, dependencyDiff]
   );
   const currentNodeCount = currentElements.elements.filter(el => el.group === 'nodes').length;
 
@@ -1244,6 +1247,37 @@ const getTreeBasedCytoscapeStyles = (
       'opacity': 1,
       'z-index': 10,
       'curve-style': 'bezier'
+    }
+  },
+
+  // Diff comparison edge styles
+  {
+    selector: 'edge[diffStatus="added"]',
+    style: {
+      'line-color': '#22c55e', // Green for added dependencies
+      'target-arrow-color': '#22c55e',
+      'line-style': 'solid',
+      'opacity': 0.9,
+      'z-index': 5
+    }
+  },
+  {
+    selector: 'edge[diffStatus="removed"]',
+    style: {
+      'line-color': '#ef4444', // Red for removed dependencies
+      'target-arrow-color': '#ef4444',
+      'line-style': 'dashed',
+      'opacity': 0.7,
+      'z-index': 3
+    }
+  },
+  {
+    selector: 'edge[diffStatus="unchanged"]',
+    style: {
+      'line-color': '#94a3b8', // Gray for unchanged dependencies
+      'target-arrow-color': '#94a3b8',
+      'opacity': 0.4,
+      'z-index': 1
     }
   },
 
