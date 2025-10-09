@@ -318,6 +318,7 @@ export const GraphTab: React.FC<GraphTabProps> = ({
             hoveredNodeId={hoveredNodeId}
             onNodeHover={setHoveredNodeId}
             onToggleFolderExpansion={handleFolderToggle}
+            onCheckboxChange={handleTreeCheckboxChange}
             dependencyDiff={dependencyDiff}
           />
         </div>
@@ -443,8 +444,7 @@ export const GraphTab: React.FC<GraphTabProps> = ({
           padding: 20px;
           background: #fafbfc;
           border-top: 1px solid #e2e8f0;
-          height: calc(100vh - 200px);
-          max-height: calc(100vh - 200px);
+          min-height: 0;
           overflow: hidden;
         }
 
@@ -578,7 +578,6 @@ export const GraphTab: React.FC<GraphTabProps> = ({
         @media (max-width: 1200px) {
           .tree-based-graph-container {
             flex-direction: row;
-            height: auto;
             margin-left: -10px;
             margin-right: -10px;
             padding: 0 10px;
@@ -595,10 +594,6 @@ export const GraphTab: React.FC<GraphTabProps> = ({
             opacity: 0;
           }
 
-          .graph-main {
-            height: 500px;
-          }
-
           .expand-tree-button {
             top: 8px;
             left: 8px;
@@ -612,7 +607,6 @@ export const GraphTab: React.FC<GraphTabProps> = ({
             margin-left: -10px;
             margin-right: -10px;
             padding: 0 10px;
-            height: calc(100vh - 250px);
           }
         }
       `}</style>

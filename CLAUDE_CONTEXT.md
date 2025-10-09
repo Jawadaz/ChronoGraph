@@ -15,6 +15,7 @@ ChronoGraph analyzes Flutter/Dart codebases to provide interactive, temporal dep
 3. **Layout Stability**: Master layout with degraded historical views for consistent spatial relationships
 4. **Developer Attribution**: Author color coding and ownership tracking
 5. **Interactive Expansion**: Click-to-expand folders while maintaining global layout stability
+6. **Advanced Coupling Analysis**: Detailed source code analysis, to grade coupling between components.
 
 ### Success Criteria
 - Reveals architectural patterns invisible in traditional tools

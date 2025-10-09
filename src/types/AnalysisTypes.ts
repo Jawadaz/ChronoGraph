@@ -143,13 +143,13 @@ export function hasEnhancedMetrics(result: AnalysisResult): result is AnalysisRe
   enhanced_dependencies: EnhancedDependency[];
   global_metrics: GlobalArchitecturalMetrics;
   node_metrics: Record<string, NodeMetrics>;
-  architecture_quality_score: number;
+  architecture_quality_score?: number;
 } {
+  // Only require the essential metrics - architecture_quality_score is optional
   return !!(
     result.enhanced_dependencies &&
     result.global_metrics &&
-    result.node_metrics &&
-    result.architecture_quality_score !== undefined
+    result.node_metrics
   );
 }
 
