@@ -9,18 +9,24 @@ export interface GraphSettings {
 
   // Layout settings for graph compactness and orientation
   layout: {
-    rankSep: number;      // Vertical spacing between levels
-    nodeSep: number;      // Horizontal spacing between nodes
-    edgeSep: number;      // Spacing between edges
+    name: string;         // Layout engine: dagre, fcose, cose, circle, concentric, grid, breadthfirst
+    rankSep: number;      // Vertical spacing between levels (dagre)
+    nodeSep: number;      // Horizontal spacing between nodes (dagre)
+    edgeSep: number;      // Spacing between edges (dagre)
     spacingFactor: number; // Overall spacing multiplier
     padding: number;      // Padding around graph
-    rankDir: string;      // Direction: TB, BT, LR, RL
-    align: string;        // Alignment: UL, UR, DL, DR, or undefined
+    rankDir: string;      // Direction: TB, BT, LR, RL (dagre)
+    align: string;        // Alignment: UL, UR, DL, DR, or undefined (dagre)
     marginX: number;      // Left/right margin
     marginY: number;      // Top/bottom margin
-    ranker: string;       // Ranking algorithm: network-simplex, tight-tree, longest-path
+    ranker: string;       // Ranking algorithm: network-simplex, tight-tree, longest-path (dagre)
     animate: boolean;     // Whether to animate layout changes
     animationDuration: number; // Animation duration in ms
+    // fCOSE specific options
+    idealEdgeLength: number;     // Ideal edge length for force-directed layouts
+    nodeRepulsion: number;       // Node repulsion force
+    gravity: number;             // Gravity force
+    numIter: number;             // Number of iterations
   };
 
   // Node count thresholds and corresponding sizes
@@ -39,6 +45,7 @@ export const DEFAULT_SETTINGS: GraphSettings = {
   folderHeight: 40,
   fontSize: 13,
   layout: {
+    name: 'dagre',      // Layout engine
     rankSep: 80,        // Vertical spacing between levels (40-200)
     nodeSep: 60,        // Horizontal spacing between nodes (20-150)
     edgeSep: 20,        // Spacing between edges (10-50)
@@ -50,7 +57,12 @@ export const DEFAULT_SETTINGS: GraphSettings = {
     marginY: 0,         // Top/bottom margin (0-50)
     ranker: 'network-simplex', // Ranking algorithm
     animate: true,      // Enable layout animations
-    animationDuration: 500 // Animation duration in ms (100-2000)
+    animationDuration: 500, // Animation duration in ms (100-2000)
+    // fCOSE defaults
+    idealEdgeLength: 100,
+    nodeRepulsion: 4500,
+    gravity: 0.25,
+    numIter: 2500
   },
   thresholds: [
     { nodeCount: 10, fileSize: 50, folderWidth: 70, folderHeight: 45, fontSize: 14 },

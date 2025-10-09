@@ -25,6 +25,7 @@ interface TreeBasedCytoscapeGraphProps {
   hoveredNodeId?: string | null;
   onNodeHover?: (nodeId: string | null) => void;
   onToggleFolderExpansion?: (nodeId: string) => void;
+  onCheckboxChange?: (nodeId: string, newState: 'checked' | 'unchecked' | 'half-checked') => void;
   dependencyDiff?: DependencyDiff | null;
 }
 
@@ -46,6 +47,7 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
   hoveredNodeId,
   onNodeHover,
   onToggleFolderExpansion,
+  onCheckboxChange,
   dependencyDiff
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -54,6 +56,23 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
   const { calculateSizes, settings } = useGraphSettings();
   const [forceUpdate, setForceUpdate] = useState(0);
   const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    nodeId: string | null;
+    nodeType: 'file' | 'folder' | null;
+    isFolder: boolean;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    nodeId: null,
+    nodeType: null,
+    isFolder: false
+  });
 
   // Initialize Cytoscape
   useEffect(() => {
@@ -209,6 +228,24 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover boundary-incoming boundary-outgoing');
     });
 
+    // Right-click context menu
+    cy.on('cxttap', 'node', (event) => {
+      const node = event.target;
+      const nodeData = node.data();
+      const renderedPosition = event.renderedPosition || event.position;
+
+      setContextMenu({
+        visible: true,
+        x: renderedPosition.x,
+        y: renderedPosition.y,
+        nodeId: nodeData.id,
+        nodeType: nodeData.type,
+        isFolder: nodeData.type === 'folder'
+      });
+
+      event.preventDefault();
+    });
+
     // Hover effects for edges
     cy.on('mouseover', 'edge', (event) => {
       const edge = event.target;
@@ -293,23 +330,45 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     cyRef.current.add(elements as any);
 
     // Run layout with all parameters
-    cyRef.current.layout({
-      name: 'dagre',
-      directed: true,
+    const layoutName = settings?.layout?.name || 'dagre';
+    const baseLayoutOptions = {
+      name: layoutName,
       padding: settings?.layout?.padding || 20,
       spacingFactor: settings?.layout?.spacingFactor || 1.5,
       animate: settings?.layout?.animate ?? true,
       animationDuration: settings?.layout?.animationDuration || 500,
-      fit: true,
-      rankDir: settings?.layout?.rankDir || 'TB',
-      align: settings?.layout?.align || undefined,
-      rankSep: settings?.layout?.rankSep || 80,
-      nodeSep: settings?.layout?.nodeSep || 60,
-      edgeSep: settings?.layout?.edgeSep || 20,
-      marginX: settings?.layout?.marginX || 0,
-      marginY: settings?.layout?.marginY || 0,
-      ranker: settings?.layout?.ranker || 'network-simplex'
-    }).run();
+      fit: true
+    };
+
+    // Add layout-specific options
+    let layoutOptions: any = { ...baseLayoutOptions };
+
+    if (layoutName === 'dagre') {
+      layoutOptions = {
+        ...layoutOptions,
+        directed: true,
+        rankDir: settings?.layout?.rankDir || 'TB',
+        align: settings?.layout?.align || undefined,
+        rankSep: settings?.layout?.rankSep || 80,
+        nodeSep: settings?.layout?.nodeSep || 60,
+        edgeSep: settings?.layout?.edgeSep || 20,
+        marginX: settings?.layout?.marginX || 0,
+        marginY: settings?.layout?.marginY || 0,
+        ranker: settings?.layout?.ranker || 'network-simplex'
+      };
+    } else if (layoutName === 'fcose') {
+      layoutOptions = {
+        ...layoutOptions,
+        idealEdgeLength: settings?.layout?.idealEdgeLength || 100,
+        nodeRepulsion: settings?.layout?.nodeRepulsion || 4500,
+        gravity: settings?.layout?.gravity || 0.25,
+        numIter: settings?.layout?.numIter || 2500,
+        tile: true,
+        randomize: false
+      };
+    }
+
+    cyRef.current.layout(layoutOptions).run();
 
     console.log('✅ Graph updated with tree-based filtering:', {
       nodes: cyRef.current.nodes().length,
@@ -376,23 +435,45 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
       cyRef.current.style(newStyles);
 
       // Force a re-layout with new layout parameters
-      cyRef.current.layout({
-        name: 'dagre',
-        directed: true,
+      const layoutName = layout?.name || 'dagre';
+      const baseLayoutOptions = {
+        name: layoutName,
         padding: layout?.padding || 20,
         spacingFactor: layout?.spacingFactor || 1.5,
         animate: layout?.animate ?? true,
         animationDuration: layout?.animationDuration || 300,
-        fit: true,
-        rankDir: layout?.rankDir || 'TB',
-        align: layout?.align || undefined,
-        rankSep: layout?.rankSep || 80,
-        nodeSep: layout?.nodeSep || 60,
-        edgeSep: layout?.edgeSep || 20,
-        marginX: layout?.marginX || 0,
-        marginY: layout?.marginY || 0,
-        ranker: layout?.ranker || 'network-simplex'
-      }).run();
+        fit: true
+      };
+
+      // Add layout-specific options
+      let layoutOptions: any = { ...baseLayoutOptions };
+
+      if (layoutName === 'dagre') {
+        layoutOptions = {
+          ...layoutOptions,
+          directed: true,
+          rankDir: layout?.rankDir || 'TB',
+          align: layout?.align || undefined,
+          rankSep: layout?.rankSep || 80,
+          nodeSep: layout?.nodeSep || 60,
+          edgeSep: layout?.edgeSep || 20,
+          marginX: layout?.marginX || 0,
+          marginY: layout?.marginY || 0,
+          ranker: layout?.ranker || 'network-simplex'
+        };
+      } else if (layoutName === 'fcose') {
+        layoutOptions = {
+          ...layoutOptions,
+          idealEdgeLength: layout?.idealEdgeLength || 100,
+          nodeRepulsion: layout?.nodeRepulsion || 4500,
+          gravity: layout?.gravity || 0.25,
+          numIter: layout?.numIter || 2500,
+          tile: true,
+          randomize: false
+        };
+      }
+
+      cyRef.current.layout(layoutOptions).run();
 
       console.log('✅ Graph layout updated with new sizes and spacing');
     }
@@ -410,6 +491,38 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     dependencies: dependencies.length,
     treeNodes: treeNodes.size
   });
+
+  // Close context menu on click
+  useEffect(() => {
+    const handleClick = () => {
+      if (contextMenu.visible) {
+        setContextMenu(prev => ({ ...prev, visible: false }));
+      }
+    };
+
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [contextMenu.visible]);
+
+  // Context menu handlers
+  const handleToggleVisibility = () => {
+    if (!contextMenu.nodeId || !onCheckboxChange) return;
+
+    const node = treeNodes.get(contextMenu.nodeId);
+    if (!node) return;
+
+    // Toggle between checked and unchecked
+    const newState = node.checkboxState === 'checked' ? 'unchecked' : 'checked';
+    onCheckboxChange(contextMenu.nodeId, newState);
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleToggleExpansion = () => {
+    if (!contextMenu.nodeId || !contextMenu.isFolder || !onToggleFolderExpansion) return;
+
+    onToggleFolderExpansion(contextMenu.nodeId);
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  };
 
   return (
     <div className={`tree-based-cytoscape-container ${isSettingsCollapsed ? 'settings-collapsed' : ''}`}>
@@ -582,7 +695,55 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
           font-size: 14px;
           z-index: 1000;
         }
+
+        .context-menu {
+          position: absolute;
+          background: white;
+          border: 1px solid #e2e8f0;
+          border-radius: 6px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+          padding: 4px 0;
+          min-width: 180px;
+          z-index: 10000;
+        }
+
+        .context-menu-item {
+          padding: 8px 16px;
+          cursor: pointer;
+          font-size: 14px;
+          color: #374151;
+          transition: background-color 0.15s;
+        }
+
+        .context-menu-item:hover {
+          background-color: #f3f4f6;
+        }
+
+        .context-menu-item:active {
+          background-color: #e5e7eb;
+        }
       `}</style>
+
+      {/* Context Menu */}
+      {contextMenu.visible && contextMenu.nodeId && (
+        <div
+          className="context-menu"
+          style={{
+            left: `${contextMenu.x}px`,
+            top: `${contextMenu.y}px`
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-item" onClick={handleToggleVisibility}>
+            {treeNodes.get(contextMenu.nodeId)?.checkboxState === 'checked' ? '👁️ Hide' : '👁️‍🗨️ Show'}
+          </div>
+          {contextMenu.isFolder && (
+            <div className="context-menu-item" onClick={handleToggleExpansion}>
+              🔄 Toggle Expansion
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -168,46 +168,129 @@ export const GraphSettings: React.FC<GraphSettingsProps> = ({
             <h4>🧭 Orientation & Algorithm</h4>
             <div className="advanced-controls">
               <div className="control-row">
-                <label>Direction:</label>
+                <label>Engine:</label>
                 <select
-                  value={settings.layout.rankDir}
-                  onChange={(e) => handleLayoutChange('rankDir', e.target.value)}
+                  value={settings.layout.name}
+                  onChange={(e) => handleLayoutChange('name', e.target.value)}
                   className="layout-select"
                 >
-                  <option value="TB">Top → Bottom</option>
-                  <option value="BT">Bottom → Top</option>
-                  <option value="LR">Left → Right</option>
-                  <option value="RL">Right → Left</option>
+                  <option value="dagre">Dagre (Hierarchical)</option>
+                  <option value="fcose">fCOSE (Force-Directed)</option>
+                  <option value="cose">COSE (Spring)</option>
+                  <option value="circle">Circle</option>
+                  <option value="concentric">Concentric</option>
+                  <option value="grid">Grid</option>
+                  <option value="breadthfirst">Breadthfirst</option>
                 </select>
               </div>
 
-              <div className="control-row">
-                <label>Alignment:</label>
-                <select
-                  value={settings.layout.align}
-                  onChange={(e) => handleLayoutChange('align', e.target.value)}
-                  className="layout-select"
-                >
-                  <option value="">Auto</option>
-                  <option value="UL">Up-Left</option>
-                  <option value="UR">Up-Right</option>
-                  <option value="DL">Down-Left</option>
-                  <option value="DR">Down-Right</option>
-                </select>
-              </div>
+              {/* Dagre-specific options */}
+              {settings.layout.name === 'dagre' && (
+                <>
+                  <div className="control-row">
+                    <label>Direction:</label>
+                    <select
+                      value={settings.layout.rankDir}
+                      onChange={(e) => handleLayoutChange('rankDir', e.target.value)}
+                      className="layout-select"
+                    >
+                      <option value="TB">Top → Bottom</option>
+                      <option value="BT">Bottom → Top</option>
+                      <option value="LR">Left → Right</option>
+                      <option value="RL">Right → Left</option>
+                    </select>
+                  </div>
 
-              <div className="control-row">
-                <label>Algorithm:</label>
-                <select
-                  value={settings.layout.ranker}
-                  onChange={(e) => handleLayoutChange('ranker', e.target.value)}
-                  className="layout-select"
-                >
-                  <option value="network-simplex">Network Simplex</option>
-                  <option value="tight-tree">Tight Tree</option>
-                  <option value="longest-path">Longest Path</option>
-                </select>
-              </div>
+                  <div className="control-row">
+                    <label>Alignment:</label>
+                    <select
+                      value={settings.layout.align}
+                      onChange={(e) => handleLayoutChange('align', e.target.value)}
+                      className="layout-select"
+                    >
+                      <option value="">Auto</option>
+                      <option value="UL">Up-Left</option>
+                      <option value="UR">Up-Right</option>
+                      <option value="DL">Down-Left</option>
+                      <option value="DR">Down-Right</option>
+                    </select>
+                  </div>
+
+                  <div className="control-row">
+                    <label>Ranker:</label>
+                    <select
+                      value={settings.layout.ranker}
+                      onChange={(e) => handleLayoutChange('ranker', e.target.value)}
+                      className="layout-select"
+                    >
+                      <option value="network-simplex">Network Simplex</option>
+                      <option value="tight-tree">Tight Tree</option>
+                      <option value="longest-path">Longest Path</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {/* fCOSE-specific options */}
+              {settings.layout.name === 'fcose' && (
+                <>
+                  <div className="control-row">
+                    <label>Edge Len:</label>
+                    <input
+                      type="range"
+                      min="50"
+                      max="300"
+                      step="10"
+                      value={settings.layout.idealEdgeLength}
+                      onChange={(e) => handleLayoutChange('idealEdgeLength', parseInt(e.target.value))}
+                      className="layout-slider"
+                    />
+                    <span className="value-display">{settings.layout.idealEdgeLength}px</span>
+                  </div>
+
+                  <div className="control-row">
+                    <label>Repulsion:</label>
+                    <input
+                      type="range"
+                      min="1000"
+                      max="10000"
+                      step="500"
+                      value={settings.layout.nodeRepulsion}
+                      onChange={(e) => handleLayoutChange('nodeRepulsion', parseInt(e.target.value))}
+                      className="layout-slider"
+                    />
+                    <span className="value-display">{settings.layout.nodeRepulsion}</span>
+                  </div>
+
+                  <div className="control-row">
+                    <label>Gravity:</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={settings.layout.gravity ?? 0.25}
+                      onChange={(e) => handleLayoutChange('gravity', parseFloat(e.target.value))}
+                      className="layout-slider"
+                    />
+                    <span className="value-display">{(settings.layout.gravity ?? 0.25).toFixed(2)}</span>
+                  </div>
+
+                  <div className="control-row">
+                    <label>Iterations:</label>
+                    <input
+                      type="range"
+                      min="500"
+                      max="5000"
+                      step="250"
+                      value={settings.layout.numIter}
+                      onChange={(e) => handleLayoutChange('numIter', parseInt(e.target.value))}
+                      className="layout-slider"
+                    />
+                    <span className="value-display">{settings.layout.numIter}</span>
+                  </div>
+                </>
+              )}
 
               <div className="control-row">
                 <label>X-Margin:</label>
