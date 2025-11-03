@@ -552,31 +552,32 @@ impl LakosAnalyzer {
         };
         
         // Lakos typically outputs relative paths from the project root
+        // We want to keep them relative for cleaner UI display
         let relative_path = PathBuf::from(clean_path);
         let full_path = project_path.join(&relative_path);
         
-        // Verify the file exists
+        // Verify the file exists (but return relative path)
         if full_path.exists() {
-            Ok(full_path)
-        } else {
-            // Try common variations
-            let variations = vec![
-                project_path.join(format!("{}.dart", clean_path)),
-                project_path.join("lib").join(&relative_path),
-                project_path.join("lib").join(format!("{}.dart", clean_path)),
-            ];
-            
-            for variation in variations {
-                if variation.exists() {
-                    return Ok(variation);
-                }
-            }
-            
-            // If file doesn't exist, still return the path but log warning
-            eprintln!("Warning: File not found for library '{}', using path: {}", 
-                    library_name, full_path.display());
-            Ok(full_path)
+            return Ok(relative_path);
         }
+        
+        // Try common variations
+        let variations = vec![
+            (format!("{}.dart", clean_path), project_path.join(format!("{}.dart", clean_path))),
+            (format!("lib/{}", clean_path), project_path.join("lib").join(&relative_path)),
+            (format!("lib/{}.dart", clean_path), project_path.join("lib").join(format!("{}.dart", clean_path))),
+        ];
+        
+        for (relative_variation, full_variation) in variations {
+            if full_variation.exists() {
+                return Ok(PathBuf::from(relative_variation));
+            }
+        }
+        
+        // If file doesn't exist, still return the relative path but log warning
+        eprintln!("Warning: File not found for library '{}', using relative path: {}", 
+                library_name, relative_path.display());
+        Ok(relative_path)
     }
     
     /// Check if project has pubspec.yaml (Flutter/Dart project)
@@ -672,10 +673,28 @@ impl DependencyAnalyzer for LakosAnalyzer {
             .map(EnhancedDependency::from)
             .collect();
 
+        // Make all paths relative to the project root for cleaner UI display
+        println!("🔍 DEBUG: Project path for relative conversion: {}", project_path.display());
+        if !dependencies.is_empty() {
+            println!("🔍 DEBUG: Sample dependency before relative: {} -> {}", 
+                     dependencies[0].source_file.display(), 
+                     dependencies[0].target_file.display());
+        }
+        
+        let relative_dependencies = Self::make_dependencies_relative(&dependencies, project_path);
+        let relative_enhanced = Self::make_enhanced_dependencies_relative(&enhanced_dependencies, project_path);
+        let relative_dart_files = Self::make_paths_relative(&dart_files, project_path);
+        
+        if !relative_dependencies.is_empty() {
+            println!("🔍 DEBUG: Sample dependency after relative: {} -> {}", 
+                     relative_dependencies[0].source_file.display(), 
+                     relative_dependencies[0].target_file.display());
+        }
+
         // Create enhanced analysis result
         let mut result = AnalysisResult {
-            dependencies,
-            enhanced_dependencies: Some(enhanced_dependencies),
+            dependencies: relative_dependencies,
+            enhanced_dependencies: Some(relative_enhanced),
             global_metrics: global_metrics.clone(),
             node_metrics: node_metrics.clone(),
             architecture_quality_score: None,
@@ -683,7 +702,7 @@ impl DependencyAnalyzer for LakosAnalyzer {
             analyzer_version: self.version().to_string(),
             analysis_timestamp: chrono::Utc::now().timestamp(),
             project_path: project_path.to_path_buf(),
-            analyzed_files: dart_files.clone(),
+            analyzed_files: relative_dart_files,
             skipped_files: Vec::new(),
             metrics,
             issues,
@@ -724,6 +743,83 @@ impl DependencyAnalyzer for LakosAnalyzer {
 impl Default for LakosAnalyzer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// Helper functions to make paths relative to project root
+impl LakosAnalyzer {
+    /// Make dependency paths relative to project root
+    fn make_dependencies_relative(dependencies: &[RawDependency], project_path: &Path) -> Vec<RawDependency> {
+        dependencies.iter().map(|dep| {
+            let source = Self::make_path_relative(&dep.source_file, project_path);
+            let target = Self::make_path_relative(&dep.target_file, project_path);
+            
+            RawDependency {
+                source_file: source,
+                target_file: target,
+                relationship_type: dep.relationship_type.clone(),
+                weight: dep.weight.clone(),
+                line_number: dep.line_number,
+                import_statement: dep.import_statement.clone(),
+                symbols: dep.symbols.clone(),
+                metadata: dep.metadata.clone(),
+            }
+        }).collect()
+    }
+
+    /// Make enhanced dependency paths relative to project root
+    fn make_enhanced_dependencies_relative(dependencies: &[EnhancedDependency], project_path: &Path) -> Vec<EnhancedDependency> {
+        dependencies.iter().map(|dep| {
+            let source = Self::make_path_relative(&dep.source_file, project_path);
+            let target = Self::make_path_relative(&dep.target_file, project_path);
+            
+            EnhancedDependency {
+                source_file: source,
+                target_file: target,
+                relationship_type: dep.relationship_type.clone(),
+                weight: dep.weight.clone(),
+                line_number: dep.line_number,
+                import_statement: dep.import_statement.clone(),
+                symbols: dep.symbols.clone(),
+                metadata: dep.metadata.clone(),
+                is_critical: dep.is_critical,
+                creates_cycle: dep.creates_cycle,
+                coupling_strength: dep.coupling_strength,
+            }
+        }).collect()
+    }
+
+    /// Make a list of paths relative to project root
+    fn make_paths_relative(paths: &[PathBuf], project_path: &Path) -> Vec<PathBuf> {
+        paths.iter()
+            .map(|p| Self::make_path_relative(p, project_path))
+            .collect()
+    }
+
+    /// Make a single path relative to project root
+    fn make_path_relative(path: &Path, project_path: &Path) -> PathBuf {
+        // Normalize both paths to handle Windows path separators
+        let path_str = path.to_string_lossy().replace('\\', "/");
+        let project_str = project_path.to_string_lossy().replace('\\', "/");
+        
+        // Try to strip the project path prefix
+        if let Ok(relative) = path.strip_prefix(project_path) {
+            return relative.to_path_buf();
+        }
+        
+        // If direct strip_prefix didn't work, try string-based stripping
+        // This handles cases where the paths might have different separator styles
+        if path_str.starts_with(&project_str) {
+            let mut stripped = path_str[project_str.len()..].to_string();
+            // Remove leading slash if present
+            if stripped.starts_with('/') || stripped.starts_with('\\') {
+                stripped = stripped[1..].to_string();
+            }
+            return PathBuf::from(stripped);
+        }
+        
+        // If it's already relative or doesn't start with project_path, return as-is
+        path.to_path_buf()
     }
 }
 

@@ -51,10 +51,13 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   selectedCommit,
   onCommitSelect
 }) => {
+  // Reverse snapshots to show most recent first
+  const reversedSnapshots = [...snapshots].reverse();
+  
   return (
     <div className="timeline-content">
       <div className="commits-timeline">
-        {snapshots.map((snapshot, index) => (
+        {reversedSnapshots.map((snapshot, index) => (
           <div
             key={index}
             className={`commit-item ${selectedCommit?.commit_hash === snapshot.commit_hash ? 'selected' : ''}`}
@@ -110,15 +113,22 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         </div>
       )}
 
-      <style jsx>{`
+      <style>{`
         .timeline-content {
-          padding: 20px;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
         }
 
         .commits-timeline {
+          flex: 1;
           display: flex;
           flex-direction: column;
           gap: 12px;
+          overflow-y: auto;
+          overflow-x: hidden;
+          padding-right: 8px;
         }
 
         .commit-item {

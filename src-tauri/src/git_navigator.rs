@@ -61,13 +61,30 @@ impl GitTemporalNavigator {
                 .context("Failed to create local repository directory")?;
         }
 
-        println!("Cloning local repository from {} to {}", source_path.display(), cache_path.display());
-
-        // Clone the local repository to temp location
-        let repo = Repository::clone(
-            source_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?,
-            &cache_path
-        ).context("Failed to clone local repository")?;
+        // Check if cache already exists and is valid
+        let repo = if cache_path.exists() && Repository::open(&cache_path).is_ok() {
+            println!("Found existing cached repository at {}, removing and re-cloning...", cache_path.display());
+            
+            // Remove the existing cache to get a fresh clone
+            fs::remove_dir_all(&cache_path)
+                .context("Failed to remove existing cached repository")?;
+            
+            println!("Cloning local repository from {} to {}", source_path.display(), cache_path.display());
+            
+            // Clone fresh
+            Repository::clone(
+                source_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?,
+                &cache_path
+            ).context("Failed to clone local repository")?
+        } else {
+            println!("Cloning local repository from {} to {}", source_path.display(), cache_path.display());
+            
+            // Clone the local repository to temp location
+            Repository::clone(
+                source_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?,
+                &cache_path
+            ).context("Failed to clone local repository")?
+        };
 
         // Get default branch name
         let default_branch = {

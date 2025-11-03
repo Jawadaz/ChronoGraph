@@ -56,9 +56,12 @@ pub struct ChronoGraphConfig {
 
 impl Default for ChronoGraphConfig {
     fn default() -> Self {
+        // Use platform-specific temporary directory
+        let temp_dir = std::env::temp_dir().join("chronograph");
+        
         Self {
             github_url: String::new(),
-            local_base_dir: PathBuf::from("/tmp/chronograph"),
+            local_base_dir: temp_dir,
             analyzer_name: "lakos".to_string(),
             analysis_config: AnalysisConfig::default(),
             commit_sampling: 5, // Every 5th commit for performance
@@ -185,15 +188,19 @@ impl ChronoGraphEngine {
                 Err(e) => {
                     let error_string = e.to_string();
                     let error_msg = format!("{}", error_string);
-                    println!("❌ Error: {}", error_msg);
+                    println!("⚠️  Error analyzing commit {}: {}", &commit_info.hash[..8], error_msg);
 
-                    // For critical failures (like project structure issues), fail immediately
-                    let is_critical_error = error_string.contains("Failed to run dependency analysis") ||
-                                           error_string.contains("Directory listing failed") ||
-                                           error_string.contains("Cannot analyze project") ||
-                                           error_string.contains("Required project files not found");
+                    // Check if this is a missing project files error
+                    let is_missing_project_files = error_string.contains("Cannot analyze project") ||
+                                                   error_string.contains("Required project files not found");
+                    
+                    // Check if this is truly a critical infrastructure error
+                    let is_infrastructure_error = error_string.contains("Failed to checkout commit") ||
+                                                 error_string.contains("Directory listing failed");
 
-                    if is_critical_error {
+                    // Only fail immediately for infrastructure errors (git/filesystem problems)
+                    // For missing project files, we'll check at the end if we got ANY successful analyses
+                    if is_infrastructure_error {
                         // Send failed progress update before returning
                         progress_callback(AnalysisProgress {
                             phase: AnalysisPhase::Failed(error_msg.clone()),
@@ -206,22 +213,55 @@ impl ChronoGraphEngine {
                         return Err(anyhow::anyhow!("{}", error_msg));
                     }
 
-                    // For other errors, continue with warning
-                    println!("Warning: Continuing with next commit...");
+                    // For missing project files and other errors, continue with warning
+                    if is_missing_project_files {
+                        println!("⏭️  Skipping commit {} (project files not found yet) and continuing...", &commit_info.hash[..8]);
+                    } else {
+                        println!("⏭️  Skipping commit {} and continuing with next commit...", &commit_info.hash[..8]);
+                    }
                 }
             }
+        }
+        
+        // Check if we got at least some successful analyses
+        if snapshots.is_empty() {
+            let error_msg = format!(
+                "Failed to analyze any commits. This could mean:\n\
+                 1. The repository doesn't contain a Flutter/Dart project (no pubspec.yaml found)\n\
+                 2. The project is in a subfolder - please specify the subfolder path in settings\n\
+                 3. The project was added in later commits - try analyzing more commits"
+            );
+            
+            progress_callback(AnalysisProgress {
+                phase: AnalysisPhase::Failed(error_msg.clone()),
+                current_commit: analysis_count,
+                total_commits: analysis_count,
+                current_commit_hash: String::new(),
+                message: error_msg.clone(),
+                percentage: 100.0,
+            });
+            
+            return Err(anyhow::anyhow!("{}", error_msg));
         }
         
         // Store results
         self.snapshots = snapshots.clone();
         self.git_navigator = Some(git_navigator);
         
+        let success_rate = (snapshots.len() as f64 / analysis_count as f64 * 100.0) as usize;
+        let message = if snapshots.len() < analysis_count {
+            format!("Analysis completed. {} of {} commits analyzed successfully ({}% success rate). {} commits skipped due to missing project files.", 
+                   snapshots.len(), analysis_count, success_rate, analysis_count - snapshots.len())
+        } else {
+            format!("Analysis completed. {} snapshots generated.", snapshots.len())
+        };
+        
         progress_callback(AnalysisProgress {
             phase: AnalysisPhase::Completed,
             current_commit: analysis_count,
             total_commits: analysis_count,
             current_commit_hash: String::new(),
-            message: format!("Analysis completed. {} snapshots generated.", snapshots.len()),
+            message,
             percentage: 100.0,
         });
         
