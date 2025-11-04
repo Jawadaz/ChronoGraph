@@ -11,6 +11,7 @@ export interface CytoscapeNodeData {
   size: number;
   instability: number;
   children?: string[];
+  hasChanges?: boolean; // True if node has added/removed dependencies in comparison mode
 }
 
 export interface CytoscapeEdgeData {

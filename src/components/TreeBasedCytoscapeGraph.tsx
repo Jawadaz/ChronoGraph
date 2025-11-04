@@ -1488,6 +1488,42 @@ const getTreeBasedCytoscapeStyles = (
     }
   },
 
+  // Leaf nodes (files and collapsed folders) with changes get thick orange border
+  {
+    selector: 'node.has-changes.leaf',
+    style: {
+      'border-width': '5px',
+      'border-color': '#ff6b00',
+      'background-blacken': 0.05 // Slightly darken to emphasize
+    }
+  },
+
+  // Files get double solid border for extra visibility
+  {
+    selector: 'node.has-changes.file.leaf',
+    style: {
+      'border-style': 'double'
+    }
+  },
+
+  // Collapsed folders get dashed border
+  {
+    selector: 'node.has-changes.folder.leaf',
+    style: {
+      'border-style': 'dashed'
+    }
+  },
+
+  // Expanded folders (parent containers) get only thin dashed border
+  {
+    selector: 'node.has-changes:parent',
+    style: {
+      'border-width': '3px',
+      'border-color': '#ff6b00',
+      'border-style': 'dashed'
+    }
+  },
+
   {
     selector: 'edge:unselected',
     style: {

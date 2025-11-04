@@ -104,6 +104,11 @@ export function transformToTreeBasedGraphElements(
   // Create nodes for all included paths that don't exist yet (half-checked folders, excluding artificial root)
   createIncludedNodes(treeNodes, includedPaths, expandedFolders, nodes, shouldExcludeRoot ? rootId : undefined);
 
+  // Mark nodes that have dependency changes (added/removed)
+  if (dependencyDiff) {
+    markNodesWithChanges(nodes, edges);
+  }
+
   // Convert to Cytoscape elements
   const elements: CytoscapeElement[] = [];
 
@@ -114,19 +119,25 @@ export function transformToTreeBasedGraphElements(
 
   // Add containers first
   containerNodes.forEach(nodeData => {
+    const classes = [nodeData.type, 'expanded'];
+    if (nodeData.hasChanges) classes.push('has-changes');
+
     elements.push({
       group: 'nodes',
       data: nodeData,
-      classes: [nodeData.type, 'expanded']
+      classes
     });
   });
 
   // Add leaf nodes
   leafNodes.forEach(nodeData => {
+    const classes = [nodeData.type, nodeData.isExpanded ? 'expanded' : 'collapsed', 'leaf'];
+    if (nodeData.hasChanges) classes.push('has-changes');
+
     elements.push({
       group: 'nodes',
       data: nodeData,
-      classes: [nodeData.type, nodeData.isExpanded ? 'expanded' : 'collapsed', 'leaf']
+      classes
     });
   });
 
@@ -560,4 +571,52 @@ function getConsistentInstability(path: string): number {
     hash = hash & hash; // Convert to 32bit integer
   }
   return Math.abs(hash) / 2147483647;
+}
+
+/**
+ * Mark nodes that have dependency changes (added/removed dependencies)
+ * Also propagate changes up to parent folders
+ */
+function markNodesWithChanges(
+  nodes: Map<string, CytoscapeNodeData>,
+  edges: Map<string, CytoscapeEdgeData>
+): void {
+  const nodesWithChanges = new Set<string>();
+
+  // Find all nodes that are endpoints of added/removed edges
+  edges.forEach(edge => {
+    if (edge.diffStatus === 'added' || edge.diffStatus === 'removed') {
+      nodesWithChanges.add(edge.source);
+      nodesWithChanges.add(edge.target);
+    }
+  });
+
+  // Mark the nodes themselves
+  nodesWithChanges.forEach(nodeId => {
+    const node = nodes.get(nodeId);
+    if (node) {
+      node.hasChanges = true;
+    }
+  });
+
+  // Propagate changes up to parent folders
+  nodesWithChanges.forEach(nodeId => {
+    const node = nodes.get(nodeId);
+    if (node && node.parent) {
+      markParentChain(node.parent, nodes);
+    }
+  });
+}
+
+/**
+ * Mark all parents in the chain as having changes
+ */
+function markParentChain(parentId: string, nodes: Map<string, CytoscapeNodeData>): void {
+  const parent = nodes.get(parentId);
+  if (parent) {
+    parent.hasChanges = true;
+    if (parent.parent) {
+      markParentChain(parent.parent, nodes);
+    }
+  }
 }
