@@ -2,6 +2,9 @@ import React, { useRef, useEffect, useState, useMemo } from 'react';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
 import fcose from 'cytoscape-fcose';
+import popper from 'cytoscape-popper';
+import tippy, { Instance as TippyInstance } from 'tippy.js';
+import 'tippy.js/dist/tippy.css';
 
 import { Dependency, AnalysisResult, hasEnhancedMetrics, getNodeMetrics, calculateVisualEncoding, VisualEncodingConfig } from '../types/Dependency';
 import { TreeNode } from '../utils/treeStructure';
@@ -9,10 +12,13 @@ import { transformToTreeBasedGraphElements } from '../utils/treeBasedGraphTransf
 import { GraphSettings } from './GraphSettings';
 import { useGraphSettings } from '../hooks/useGraphSettings';
 import { DependencyDiff } from '../utils/commitDiff';
+import { generateNodeTooltipHTML, generateEdgeTooltipHTML } from '../utils/tooltipContent';
+import { CytoscapeNodeData, CytoscapeEdgeData } from '../utils/cytoscapeTransforms';
 
-// Register layouts
+// Register layouts and extensions
 cytoscape.use(dagre);
 cytoscape.use(fcose);
+cytoscape.use(popper);
 
 interface TreeBasedCytoscapeGraphProps {
   dependencies: Dependency[];
@@ -57,6 +63,9 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
   const [forceUpdate, setForceUpdate] = useState(0);
   const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
 
+  // Tooltip instances
+  const tooltipInstanceRef = useRef<TippyInstance | null>(null);
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -72,6 +81,23 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     nodeId: null,
     nodeType: null,
     isFolder: false
+  });
+
+  // Edge context menu state
+  const [edgeContextMenu, setEdgeContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    source: string | null;
+    target: string | null;
+    relationshipType: string | null;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    source: null,
+    target: null,
+    relationshipType: null
   });
 
   // Initialize Cytoscape
@@ -172,6 +198,61 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
         onNodeHover(nodeId);
       }
 
+      // Destroy any existing tooltip
+      if (tooltipInstanceRef.current) {
+        tooltipInstanceRef.current.destroy();
+        tooltipInstanceRef.current = null;
+      }
+
+      // Create tooltip for this node
+      const nodeData = node.data() as CytoscapeNodeData;
+      const isCompareMode = !!dependencyDiff;
+
+      // Generate tooltip HTML
+      const tooltipHTML = generateNodeTooltipHTML(
+        nodeData,
+        analysisResult,
+        isCompareMode,
+        nodeData.diffStatus
+      );
+
+      // Create popper instance
+      const popperInstance = node.popper({
+        content: () => {
+          const div = document.createElement('div');
+          return div;
+        },
+        popper: {
+          placement: 'top',
+          modifiers: [
+            {
+              name: 'preventOverflow',
+              options: {
+                boundary: 'viewport'
+              }
+            }
+          ]
+        }
+      });
+
+      // Create tippy tooltip
+      const tippyInstance = tippy(popperInstance.popper, {
+        getReferenceClientRect: popperInstance.state.elements.reference.getBoundingClientRect,
+        content: tooltipHTML,
+        allowHTML: true,
+        arrow: true,
+        placement: 'top',
+        theme: 'light-border',
+        maxWidth: 350,
+        interactive: false,
+        appendTo: document.body,
+        trigger: 'manual',
+        showOnCreate: true,
+        hideOnClick: false
+      });
+
+      tooltipInstanceRef.current = tippyInstance;
+
       // Reset all elements first
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover boundary-incoming boundary-outgoing');
 
@@ -219,6 +300,12 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     });
 
     cy.on('mouseout', 'node', (event) => {
+      // Destroy tooltip
+      if (tooltipInstanceRef.current) {
+        tooltipInstanceRef.current.destroy();
+        tooltipInstanceRef.current = null;
+      }
+
       // Notify parent about hover end
       if (onNodeHover) {
         onNodeHover(null);
@@ -250,6 +337,56 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     cy.on('mouseover', 'edge', (event) => {
       const edge = event.target;
 
+      // Destroy any existing tooltip
+      if (tooltipInstanceRef.current) {
+        tooltipInstanceRef.current.destroy();
+        tooltipInstanceRef.current = null;
+      }
+
+      // Create tooltip for this edge
+      const edgeData = edge.data() as CytoscapeEdgeData;
+      const isCompareMode = !!dependencyDiff;
+
+      // Generate tooltip HTML
+      const tooltipHTML = generateEdgeTooltipHTML(edgeData, isCompareMode);
+
+      // Create popper instance
+      const popperInstance = edge.popper({
+        content: () => {
+          const div = document.createElement('div');
+          return div;
+        },
+        popper: {
+          placement: 'top',
+          modifiers: [
+            {
+              name: 'preventOverflow',
+              options: {
+                boundary: 'viewport'
+              }
+            }
+          ]
+        }
+      });
+
+      // Create tippy tooltip
+      const tippyInstance = tippy(popperInstance.popper, {
+        getReferenceClientRect: popperInstance.state.elements.reference.getBoundingClientRect,
+        content: tooltipHTML,
+        allowHTML: true,
+        arrow: true,
+        placement: 'top',
+        theme: 'light-border',
+        maxWidth: 350,
+        interactive: false,
+        appendTo: document.body,
+        trigger: 'manual',
+        showOnCreate: true,
+        hideOnClick: false
+      });
+
+      tooltipInstanceRef.current = tippyInstance;
+
       // Reset all elements first
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
 
@@ -262,12 +399,42 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     });
 
     cy.on('mouseout', 'edge', (event) => {
+      // Destroy tooltip
+      if (tooltipInstanceRef.current) {
+        tooltipInstanceRef.current.destroy();
+        tooltipInstanceRef.current = null;
+      }
+
       // Remove all highlighting
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover boundary-incoming boundary-outgoing');
     });
 
+    // Right-click context menu for edges
+    cy.on('cxttap', 'edge', (event) => {
+      const edge = event.target;
+      const edgeData = edge.data();
+      const renderedPosition = event.renderedPosition || event.position;
+
+      setEdgeContextMenu({
+        visible: true,
+        x: renderedPosition.x,
+        y: renderedPosition.y,
+        source: edgeData.source,
+        target: edgeData.target,
+        relationshipType: edgeData.relationshipType
+      });
+
+      event.preventDefault();
+    });
+
     // Cleanup
     return () => {
+      // Destroy any active tooltips
+      if (tooltipInstanceRef.current) {
+        tooltipInstanceRef.current.destroy();
+        tooltipInstanceRef.current = null;
+      }
+
       if (cyRef.current) {
         cyRef.current.destroy();
         cyRef.current = null;
@@ -492,17 +659,20 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     treeNodes: treeNodes.size
   });
 
-  // Close context menu on click
+  // Close context menus on click
   useEffect(() => {
     const handleClick = () => {
       if (contextMenu.visible) {
         setContextMenu(prev => ({ ...prev, visible: false }));
       }
+      if (edgeContextMenu.visible) {
+        setEdgeContextMenu(prev => ({ ...prev, visible: false }));
+      }
     };
 
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
-  }, [contextMenu.visible]);
+  }, [contextMenu.visible, edgeContextMenu.visible]);
 
   // Context menu handlers
   const handleToggleVisibility = () => {
@@ -522,6 +692,82 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
 
     onToggleFolderExpansion(contextMenu.nodeId);
     setContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleCopyPath = () => {
+    if (!contextMenu.nodeId) return;
+
+    navigator.clipboard.writeText(contextMenu.nodeId);
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleFocusNode = () => {
+    if (!contextMenu.nodeId || !cyRef.current) return;
+
+    const node = cyRef.current.$id(contextMenu.nodeId);
+    if (node.length === 0) return;
+
+    cyRef.current.animate({
+      fit: {
+        eles: node,
+        padding: 100
+      },
+      duration: 500,
+      easing: 'ease-in-out-cubic'
+    });
+
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleSelectNode = () => {
+    if (!contextMenu.nodeId || !onNodeSelect) return;
+
+    onNodeSelect(contextMenu.nodeId);
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  // Edge context menu handlers
+  const handleViewSourceDetails = () => {
+    if (!edgeContextMenu.source || !onNodeSelect) return;
+
+    onNodeSelect(edgeContextMenu.source);
+    setEdgeContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleViewTargetDetails = () => {
+    if (!edgeContextMenu.target || !onNodeSelect) return;
+
+    onNodeSelect(edgeContextMenu.target);
+    setEdgeContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleFocusEdge = () => {
+    if (!edgeContextMenu.source || !edgeContextMenu.target || !cyRef.current) return;
+
+    const sourceNode = cyRef.current.$id(edgeContextMenu.source);
+    const targetNode = cyRef.current.$id(edgeContextMenu.target);
+    const edge = cyRef.current.edges(`[source = "${edgeContextMenu.source}"][target = "${edgeContextMenu.target}"]`);
+
+    if (sourceNode.length === 0 || targetNode.length === 0 || edge.length === 0) return;
+
+    cyRef.current.animate({
+      fit: {
+        eles: sourceNode.union(targetNode).union(edge),
+        padding: 100
+      },
+      duration: 500,
+      easing: 'ease-in-out-cubic'
+    });
+
+    setEdgeContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  const handleCopyEdgeInfo = () => {
+    if (!edgeContextMenu.source || !edgeContextMenu.target) return;
+
+    const info = `${edgeContextMenu.source} → ${edgeContextMenu.target}`;
+    navigator.clipboard.writeText(info);
+    setEdgeContextMenu(prev => ({ ...prev, visible: false }));
   };
 
   return (
@@ -722,6 +968,12 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
         .context-menu-item:active {
           background-color: #e5e7eb;
         }
+
+        .context-menu-separator {
+          height: 1px;
+          background-color: #e2e8f0;
+          margin: 4px 0;
+        }
       `}</style>
 
       {/* Context Menu */}
@@ -734,6 +986,16 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          <div className="context-menu-item" onClick={handleSelectNode}>
+            ℹ️ View Details
+          </div>
+          <div className="context-menu-item" onClick={handleFocusNode}>
+            🎯 Focus & Zoom
+          </div>
+          <div className="context-menu-item" onClick={handleCopyPath}>
+            📋 Copy Path
+          </div>
+          <div className="context-menu-separator"></div>
           <div className="context-menu-item" onClick={handleToggleVisibility}>
             {treeNodes.get(contextMenu.nodeId)?.checkboxState === 'checked' ? '👁️ Hide' : '👁️‍🗨️ Show'}
           </div>
@@ -742,6 +1004,32 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
               🔄 Toggle Expansion
             </div>
           )}
+        </div>
+      )}
+
+      {/* Edge Context Menu */}
+      {edgeContextMenu.visible && edgeContextMenu.source && edgeContextMenu.target && (
+        <div
+          className="context-menu"
+          style={{
+            left: `${edgeContextMenu.x}px`,
+            top: `${edgeContextMenu.y}px`
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-item" onClick={handleFocusEdge}>
+            🎯 Focus & Zoom
+          </div>
+          <div className="context-menu-item" onClick={handleCopyEdgeInfo}>
+            📋 Copy Edge Info
+          </div>
+          <div className="context-menu-separator"></div>
+          <div className="context-menu-item" onClick={handleViewSourceDetails}>
+            📄 View Source Details
+          </div>
+          <div className="context-menu-item" onClick={handleViewTargetDetails}>
+            📄 View Target Details
+          </div>
         </div>
       )}
     </div>
