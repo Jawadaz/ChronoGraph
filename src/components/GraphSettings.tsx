@@ -87,6 +87,27 @@ export const GraphSettings: React.FC<GraphSettingsProps> = ({
             </div>
           </div>
 
+          {/* Interaction Preferences */}
+          <div className="interaction-settings">
+            <h4>🖱️ Interaction</h4>
+            <div className="preference-row">
+              <label className="preference-label">
+                <input
+                  type="checkbox"
+                  checked={settings.updatePanelOnHover}
+                  onChange={(e) => updateSetting('updatePanelOnHover', e.target.checked)}
+                  className="preference-checkbox"
+                />
+                <span>Update details panel on hover</span>
+              </label>
+              <div className="preference-hint">
+                {settings.updatePanelOnHover
+                  ? 'Hover over nodes to see details'
+                  : 'Click nodes to see details'}
+              </div>
+            </div>
+          </div>
+
           {/* Layout Settings */}
           <div className="layout-settings">
             <h4>📐 Graph Layout & Spacing</h4>
@@ -552,6 +573,48 @@ export const GraphSettings: React.FC<GraphSettingsProps> = ({
           grid-template-columns: repeat(3, 1fr);
           gap: 8px;
           text-align: center;
+        }
+
+        .interaction-settings {
+          margin-bottom: 16px;
+          padding: 10px;
+          background: white;
+          border-radius: 4px;
+          border: 1px solid #e5e7eb;
+        }
+
+        .interaction-settings h4 {
+          margin: 0 0 10px 0;
+          font-size: 12px;
+          color: #374151;
+          font-weight: 600;
+        }
+
+        .preference-row {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .preference-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+          font-size: 12px;
+          color: #1e293b;
+        }
+
+        .preference-checkbox {
+          cursor: pointer;
+          margin: 0;
+        }
+
+        .preference-hint {
+          font-size: 10px;
+          color: #64748b;
+          font-style: italic;
+          margin-left: 24px;
         }
 
         .layout-settings {

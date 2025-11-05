@@ -2,9 +2,6 @@ import React, { useRef, useEffect, useState, useMemo } from 'react';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
 import fcose from 'cytoscape-fcose';
-import popper from 'cytoscape-popper';
-import tippy, { Instance as TippyInstance } from 'tippy.js';
-import 'tippy.js/dist/tippy.css';
 
 import { Dependency, AnalysisResult, hasEnhancedMetrics, getNodeMetrics, calculateVisualEncoding, VisualEncodingConfig } from '../types/Dependency';
 import { TreeNode } from '../utils/treeStructure';
@@ -12,13 +9,10 @@ import { transformToTreeBasedGraphElements } from '../utils/treeBasedGraphTransf
 import { GraphSettings } from './GraphSettings';
 import { useGraphSettings } from '../hooks/useGraphSettings';
 import { DependencyDiff } from '../utils/commitDiff';
-import { generateNodeTooltipHTML, generateEdgeTooltipHTML } from '../utils/tooltipContent';
-import { CytoscapeNodeData, CytoscapeEdgeData } from '../utils/cytoscapeTransforms';
 
-// Register layouts and extensions
+// Register layouts
 cytoscape.use(dagre);
 cytoscape.use(fcose);
-cytoscape.use(popper);
 
 interface TreeBasedCytoscapeGraphProps {
   dependencies: Dependency[];
@@ -60,11 +54,10 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
   const cyRef = useRef<cytoscape.Core | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const { calculateSizes, settings } = useGraphSettings();
+  const updatePanelOnHover = settings.updatePanelOnHover;
   const [forceUpdate, setForceUpdate] = useState(0);
   const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
 
-  // Tooltip instances
-  const tooltipInstanceRef = useRef<TippyInstance | null>(null);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -198,60 +191,10 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
         onNodeHover(nodeId);
       }
 
-      // Destroy any existing tooltip
-      if (tooltipInstanceRef.current) {
-        tooltipInstanceRef.current.destroy();
-        tooltipInstanceRef.current = null;
+      // Update details panel on hover if setting is enabled
+      if (updatePanelOnHover && onNodeSelect) {
+        onNodeSelect(nodeId);
       }
-
-      // Create tooltip for this node
-      const nodeData = node.data() as CytoscapeNodeData;
-      const isCompareMode = !!dependencyDiff;
-
-      // Generate tooltip HTML
-      const tooltipHTML = generateNodeTooltipHTML(
-        nodeData,
-        analysisResult,
-        isCompareMode,
-        nodeData.diffStatus
-      );
-
-      // Create popper instance
-      const popperInstance = node.popper({
-        content: () => {
-          const div = document.createElement('div');
-          return div;
-        },
-        popper: {
-          placement: 'top',
-          modifiers: [
-            {
-              name: 'preventOverflow',
-              options: {
-                boundary: 'viewport'
-              }
-            }
-          ]
-        }
-      });
-
-      // Create tippy tooltip
-      const tippyInstance = tippy(popperInstance.popper, {
-        getReferenceClientRect: popperInstance.state.elements.reference.getBoundingClientRect,
-        content: tooltipHTML,
-        allowHTML: true,
-        arrow: true,
-        placement: 'top',
-        theme: 'light-border',
-        maxWidth: 350,
-        interactive: false,
-        appendTo: document.body,
-        trigger: 'manual',
-        showOnCreate: true,
-        hideOnClick: false
-      });
-
-      tooltipInstanceRef.current = tippyInstance;
 
       // Reset all elements first
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover boundary-incoming boundary-outgoing');
@@ -300,12 +243,6 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     });
 
     cy.on('mouseout', 'node', (event) => {
-      // Destroy tooltip
-      if (tooltipInstanceRef.current) {
-        tooltipInstanceRef.current.destroy();
-        tooltipInstanceRef.current = null;
-      }
-
       // Notify parent about hover end
       if (onNodeHover) {
         onNodeHover(null);
@@ -337,56 +274,6 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     cy.on('mouseover', 'edge', (event) => {
       const edge = event.target;
 
-      // Destroy any existing tooltip
-      if (tooltipInstanceRef.current) {
-        tooltipInstanceRef.current.destroy();
-        tooltipInstanceRef.current = null;
-      }
-
-      // Create tooltip for this edge
-      const edgeData = edge.data() as CytoscapeEdgeData;
-      const isCompareMode = !!dependencyDiff;
-
-      // Generate tooltip HTML
-      const tooltipHTML = generateEdgeTooltipHTML(edgeData, isCompareMode);
-
-      // Create popper instance
-      const popperInstance = edge.popper({
-        content: () => {
-          const div = document.createElement('div');
-          return div;
-        },
-        popper: {
-          placement: 'top',
-          modifiers: [
-            {
-              name: 'preventOverflow',
-              options: {
-                boundary: 'viewport'
-              }
-            }
-          ]
-        }
-      });
-
-      // Create tippy tooltip
-      const tippyInstance = tippy(popperInstance.popper, {
-        getReferenceClientRect: popperInstance.state.elements.reference.getBoundingClientRect,
-        content: tooltipHTML,
-        allowHTML: true,
-        arrow: true,
-        placement: 'top',
-        theme: 'light-border',
-        maxWidth: 350,
-        interactive: false,
-        appendTo: document.body,
-        trigger: 'manual',
-        showOnCreate: true,
-        hideOnClick: false
-      });
-
-      tooltipInstanceRef.current = tippyInstance;
-
       // Reset all elements first
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover');
 
@@ -399,12 +286,6 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
     });
 
     cy.on('mouseout', 'edge', (event) => {
-      // Destroy tooltip
-      if (tooltipInstanceRef.current) {
-        tooltipInstanceRef.current.destroy();
-        tooltipInstanceRef.current = null;
-      }
-
       // Remove all highlighting
       cy.elements().removeClass('highlighted-incoming highlighted-outgoing highlighted-source highlighted-target highlighted-hover boundary-incoming boundary-outgoing');
     });
@@ -429,12 +310,6 @@ export const TreeBasedCytoscapeGraph: React.FC<TreeBasedCytoscapeGraphProps> = (
 
     // Cleanup
     return () => {
-      // Destroy any active tooltips
-      if (tooltipInstanceRef.current) {
-        tooltipInstanceRef.current.destroy();
-        tooltipInstanceRef.current = null;
-      }
-
       if (cyRef.current) {
         cyRef.current.destroy();
         cyRef.current = null;

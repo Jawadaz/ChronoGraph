@@ -7,6 +7,9 @@ export interface GraphSettings {
   folderHeight: number;
   fontSize: number;
 
+  // Interaction preferences
+  updatePanelOnHover: boolean; // If true, hover updates panel; if false, click updates panel
+
   // Layout settings for graph compactness and orientation
   layout: {
     name: string;         // Layout engine: dagre, fcose, cose, circle, concentric, grid, breadthfirst
@@ -44,6 +47,7 @@ export const DEFAULT_SETTINGS: GraphSettings = {
   folderWidth: 65,
   folderHeight: 40,
   fontSize: 13,
+  updatePanelOnHover: false, // Default: click to update panel
   layout: {
     name: 'dagre',      // Layout engine
     rankSep: 80,        // Vertical spacing between levels (40-200)
