@@ -32,21 +32,17 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "@popperjs/core": "^2.11.8",
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/cli": "^2.8.4",
     "@tauri-apps/plugin-dialog": "^2.4.0",
-    "@tippyjs/react": "^4.2.6",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
     "cytoscape": "^3.33.1",
     "cytoscape-dagre": "^2.5.0",
     "cytoscape-fcose": "^2.2.0",
-    "cytoscape-popper": "^4.0.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "tippy.js": "^6.3.7",
     "typescript": "^5.9.2",
     "vite": "^7.1.5"
   },
