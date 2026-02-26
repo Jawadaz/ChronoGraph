@@ -2,6 +2,9 @@
 
 React + TypeScript frontend for ChronoGraph dependency analysis tool.
 
+<img width="1915" height="1127" alt="image" src="https://github.com/user-attachments/assets/09ff1bb8-b27a-49d6-82ca-cc87c48afad5" />
+
+
 ## Architecture
 
 ### Key Components
