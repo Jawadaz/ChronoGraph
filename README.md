@@ -8,7 +8,7 @@ A desktop application for visualizing how a codebase's dependency graph evolves 
 
 - Clones a GitHub repository or opens a local one
 - Iterates through the commit history (configurable sampling rate and commit limit)
-- Analyzes file-level dependencies at each sampled commit using [Lakos-style](https://en.wikipedia.org/wiki/John_Lakos) dependency analysis
+- Analyzes file-level dependencies at each sampled commit using [Lakos](https://pub.dev/packages/lakos) tool
 - Caches analysis results in SQLite so re-running is fast
 - Visualizes the dependency graph interactively with timeline navigation, statistics, and a tree-based file explorer
 
