@@ -1,121 +1,104 @@
-# ChronoGraph Frontend
+# ChronoGraph
 
-React + TypeScript frontend for ChronoGraph dependency analysis tool.
+A desktop application for visualizing how a codebase's dependency graph evolves over time. Point it at a Git repository, and ChronoGraph walks through its commit history — sampling commits at a configurable rate — analyzing file-level dependencies at each point in time and rendering the results as an interactive graph.
 
-<img width="1915" height="1127" alt="image" src="https://github.com/user-attachments/assets/09ff1bb8-b27a-49d6-82ca-cc87c48afad5" />
+<img width="1915" height="1127" alt="ChronoGraph UI" src="https://github.com/user-attachments/assets/09ff1bb8-b27a-49d6-82ca-cc87c48afad5" />
 
+## What it does
 
-## Architecture
+- Clones a GitHub repository or opens a local one
+- Iterates through the commit history (configurable sampling rate and commit limit)
+- Analyzes file-level dependencies at each sampled commit using [Lakos-style](https://en.wikipedia.org/wiki/John_Lakos) dependency analysis
+- Caches analysis results in SQLite so re-running is fast
+- Visualizes the dependency graph interactively with timeline navigation, statistics, and a tree-based file explorer
 
-### Key Components
-**Analysis & Caching**:
-- **Cache Management (`src/components/RepositoryManager.tsx`)**: Dual-tab interface for repository and analysis cache management
-- **Tauri Integration**: Frontend commands for cache statistics, cleanup, and repository-specific cache clearing
+Currently targets **Flutter/Dart** projects via the Lakos analyzer.
 
-**Graph & Visualization**:
-- **Tree Structure (`src/utils/treeStructure.ts`)**: Repository-agnostic tree building from Lakos dependency data
-- **Tree Transforms (`src/utils/treeBasedGraphTransforms.ts`)**: Converts dependency data to Cytoscape graph elements
-- **Tree Visualization (`src/components/TreeBasedCytoscapeGraph.tsx`)**: Interactive tree-based dependency graph
+## Tech stack
 
-### Latest Features (UI/UX & Testing)
-Major improvements to user interface and automated testing:
+| Layer | Technology |
+|---|---|
+| Frontend | React 19 + TypeScript + Vite |
+| Desktop shell | Tauri 2 (Rust) |
+| Graph rendering | Cytoscape.js (dagre + fcose layouts) |
+| Git access | libgit2 via `git2` crate |
+| Cache | SQLite via `rusqlite` |
+| Unit tests | Vitest |
+| E2E tests | Playwright |
 
-1. **Scroll Bar Elimination**: Complete fix for all unwanted inner and outer scroll bars
-2. **Layout Constraints**: Proper viewport height management preventing content overflow
-3. **Document-Level Fixes**: Global CSS reset preventing page-level scrolling issues
-4. **Playwright Testing Suite**: Comprehensive UI regression testing with real-time feedback
-5. **Visual Regression Testing**: Screenshot comparison for layout consistency verification
-6. **Automated UI Detection**: Tests that automatically detect scroll bar and layout issues
-7. **Watch Mode Testing**: Real-time test feedback during development
-8. **CI/CD Ready**: Test configuration optimized for continuous integration
+## Prerequisites
 
-### Previous Features (Analysis Caching & Controls)
-Performance and interface improvements:
-
-1. **Analysis Result Caching**: 85-95% performance improvement through intelligent caching of analysis results
-2. **Cache Management UI**: Professional dual-tab interface with repository and analysis cache controls
-3. **Real-time Cache Statistics**: Live monitoring of cache hit rates, storage usage, and performance metrics
-4. **Advanced Graph Settings**: Complete settings panel redesign with right-side positioning, collapsible interface, and compact layout
-5. **Comprehensive Layout Controls**: Full Dagre layout parameter control including orientation, alignment, algorithm selection, margins, and animations
-6. **Dynamic Weight Mapping**: Intelligent arrow thickness scaling that adapts to current graph weight range for optimal visual distinction
-7. **Professional UI Design**: Space-efficient horizontal controls, proper scrollbars, and responsive layout
-8. **Tree-Based View Foundation**: Robust path normalization, state propagation, and node optimization for future enhancements
-
-### Test Coverage
-**Unit Tests (Jest)**:
-```bash
-# Run all unit tests
-npm test
-
-# Run tree structure tests
-npm test -- --testNamePattern="TreeStructure"
-
-# Run tree transform tests
-npm test -- --testNamePattern="TreeBasedGraphTransforms"
-```
-
-**UI Tests (Playwright)**:
-```bash
-# Run all UI tests
-npm run test:ui
-
-# Run web-only tests
-npm run test:ui:web
-
-# Run with visible browser for debugging
-npm run test:ui:headed
-
-# Watch mode for real-time feedback
-npm run test:ui:watch
-
-# View test results
-npm run test:ui:report
-```
-
-**Backend Tests** (from `src-tauri/`):
-```bash
-# Run all Rust tests including cache tests
-cargo test
-
-# Run only cache tests
-cargo test analysis_cache
-```
-
-## Development
-
-### Prerequisites
 - Node.js 18+
-- Rust 1.70+ (for Tauri desktop app)
+- Rust 1.70+ with `cargo`
+- On Windows: MSVC build tools
 
-### Commands
+## Getting started
+
 ```bash
-# Install dependencies
+# Install frontend dependencies
 npm install
 
-# Web development server
-npm run dev
-
-# Desktop development
+# Run the desktop app (starts Vite dev server + Tauri)
 npm run tauri:dev
 
-# Run tests
-npm test
-
-# Type checking
-npm run type-check
+# Run the web-only dev server (shows sample data, no Tauri backend)
+npm run dev
 ```
 
-## Recommended IDE Setup
+## Building
 
-**Essential Extensions**:
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```bash
+npm run tauri:build
+```
 
-**Testing Extensions**:
-- [Jest Extension](https://marketplace.visualstudio.com/items?itemName=Orta.vscode-jest) - Run/debug frontend tests with CodeLens
-- [Test Explorer UI](https://marketplace.visualstudio.com/items?itemName=hbenl.vscode-test-explorer) - Unified test tree view
-- **Rust Analyzer** automatically provides CodeLens for running/debugging Rust tests
+## Testing
 
-**Quick Commands**:
-- **Ctrl+Shift+P** → "Test: Run All Tests" (runs both frontend and backend)
-- **Ctrl+Shift+P** → "Jest: Start Runner" (watches frontend tests)
-- **Ctrl+Shift+P** → "Rust Analyzer: Run Tests" (runs Rust tests)
+```bash
+# Unit tests (Vitest)
+npm test
+
+# Unit tests with UI
+npm run test:ui
+
+# Unit test coverage
+npm run test:coverage
+
+# E2E tests (Playwright)
+npm run test:e2e
+
+# Rust backend tests
+cd src-tauri && cargo test
+```
+
+## Project structure
+
+```
+src/
+  components/
+    AnalysisResults.tsx       # Tab container for graph, timeline, stats, deps
+    GraphTab.tsx              # Cytoscape graph tab
+    TimelineTab.tsx           # Commit timeline view
+    StatisticsTab.tsx         # Dependency metrics over time
+    DependenciesTab.tsx       # Flat dependency list
+    TreeBasedCytoscapeGraph.tsx  # Tree-aware graph renderer
+    NodeDetailsPanel.tsx      # Sidebar panel for selected node details
+    GraphSettings.tsx         # Layout and display settings panel
+    RepositoryManager.tsx     # Cache management UI
+    RepositorySelectionModal.tsx  # Repository open dialog
+    AnalysisProgress.tsx      # Progress display during analysis
+  utils/
+    treeStructure.ts          # Builds file tree from dependency data
+    treeBasedGraphTransforms.ts  # Converts tree to Cytoscape elements
+
+src-tauri/src/
+  chronograph_engine.rs       # Core orchestration: clone → iterate commits → analyze
+  git_navigator.rs            # Git repository traversal via libgit2
+  lakos_analyzer.rs           # Lakos dependency analysis for Dart/Flutter
+  analysis_cache.rs           # SQLite-backed result cache
+  commands.rs                 # Tauri command handlers (IPC bridge)
+  models.rs                   # Shared data types
+```
+
+## Recommended IDE setup
+
+- [VS Code](https://code.visualstudio.com/) with the [Tauri extension](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) and [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
